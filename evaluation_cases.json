@@ -1,0 +1,111 @@
+[
+  {
+    "question": "What are the car service dates saved in the archive?",
+    "expected_intent": "service_date_inventory",
+    "expected_substrings": ["2023-05-08", "2024-09-12", "2025-11-25"]
+  },
+  {
+    "question": "What were the total charges for the car service on Sep 12 2024?",
+    "expected_intent": "total_charges",
+    "expected_substrings": ["Total charges for 2024-09-12", "$158.16"]
+  },
+  {
+    "question": "From oldest to recent car service events, state each of the services actually performed for each of the service dates",
+    "expected_intent": "performed_services_inventory",
+    "expected_substrings": [
+      "2023-05-08:",
+      "2024-09-12:",
+      "2025-11-24:",
+      "Perform Multi Point Inspection",
+      "Replace Engine Air Filter",
+      "Clean And Adjust Rear Drum Brakes"
+    ]
+  },
+  {
+    "question": "From oldest to recent car service events, state each of the services actually performed for each of the service dates. Include total cost per service data.",
+    "expected_intent": "performed_services_inventory",
+    "expected_substrings": [
+      "Total charges: $414.03",
+      "Total charges: $158.16",
+      "Total charges: $1138.29"
+    ]
+  },
+  {
+    "question": "From oldest to recent car service events, state each of the services actually performed for each of the service dates. Include total cost per service data. Put all of this in an ascii table that can be copied into another text file.",
+    "expected_intent": "performed_services_inventory",
+    "expected_substrings": [
+      "Service Date",
+      "Services Performed",
+      "Total Charges",
+      "2023-05-08",
+      "2024-09-12",
+      "2025-11-24",
+      "$414.03",
+      "$158.16",
+      "$1138.29"
+    ]
+  },
+  {
+    "question": "Generate a 3-column summary table of the services performed on each date: date, summary, cost.",
+    "expected_intent": "performed_services_inventory",
+    "expected_substrings": [
+      "| Service Date | Services Performed | Total Charges |",
+      "| --- | --- | --- |",
+      "$1138.29"
+    ]
+  },
+  {
+    "question": "Show a flowchart of the services performed on each date",
+    "expected_intent": "performed_services_inventory",
+    "expected_substrings": ["```mermaid", "flowchart TD", "Perform Multi Point Inspection"]
+  },
+  {
+    "question": "Generate a sequence diagram of the services performed on each date",
+    "expected_intent": "performed_services_inventory",
+    "expected_substrings": ["```mermaid", "sequenceDiagram", "Vehicle->>Shop"]
+  },
+  {
+    "question": "Generate a component diagram of the services performed on each date",
+    "expected_intent": "performed_services_inventory",
+    "expected_substrings": ["```mermaid", "flowchart LR", "subgraph"]
+  },
+  {
+    "question": "generate the total charges of each car service in the archive?",
+    "expected_intent": "total_charges_inventory",
+    "expected_substrings": [
+      "2023-05-08: $414.03",
+      "2024-09-12: $158.16",
+      "2025-11-24: $1138.29"
+    ]
+  },
+  {
+    "question": "Calculate the total cost of services for all recorded records? Then add them up for a total combined cost.",
+    "expected_intent": "total_charges_inventory",
+    "expected_substrings": [
+      "2023-05-08: $414.03",
+      "2024-09-12: $158.16",
+      "2025-11-24: $1138.29",
+      "Combined total: $1710.48"
+    ]
+  },
+  {
+    "question": "Generate a table of the total charges of each car service in the archive",
+    "expected_intent": "total_charges_inventory",
+    "expected_substrings": ["| Service Date | Total Charges |", "| --- | --- |", "$1138.29"]
+  },
+  {
+    "question": "Generate a table of the services not performed on each date",
+    "expected_intent": "not_performed_services_inventory",
+    "expected_substrings": ["| Service Date | Services Not Performed |", "Windshield Wiper Blades"]
+  },
+  {
+    "question": "Show a flowchart of the service advisor for each date",
+    "expected_intent": "service_advisor_inventory",
+    "expected_substrings": ["```mermaid", "flowchart TD", "COLEEN ROBINSON"]
+  },
+  {
+    "question": "Generate a sequence diagram of the repair causes for each date",
+    "expected_intent": "repair_cause_inventory",
+    "expected_substrings": ["```mermaid", "sequenceDiagram"]
+  }
+]

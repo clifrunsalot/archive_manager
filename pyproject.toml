@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "archive-manager"
+version = "0.1.0"
+description = "Document archive with semantic search and domain-specific fact extraction."
+requires-python = ">=3.10"
+
+[project.scripts]
+archive-ingest = "archive_manager.ingestion.ingest:main"
+archive-query = "archive_manager.retrieval.query:main"
+archive-watch = "archive_manager.ingestion.watch_archive:main"
+archive-intake = "archive_manager.ingestion.intake:main"
+archive-delete-event = "archive_manager.admin.delete_event:main"
+archive-purge-expired = "archive_manager.admin.purge_expired:main"
+archive-backfill-event-facts = "archive_manager.admin.backfill_event_facts:main"
+archive-reset = "archive_manager.admin.reset_archive:main"
+archive-evaluate-queries = "archive_manager.evaluation.evaluate_queries:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,22 @@
+# Environments
+.venv/
+__pycache__/
+*.pyc
+src/*.egg-info/
+
+# OS
+.DS_Store
+
+# Runtime-generated data containing real ingested document content
+data/
+logs/
+artifact_output/
+
+# Raw input documents (personal/sensitive)
+ARCHIVE/
+
+# Local test fixtures may contain real personal documents; not committed by default
+test_artifacts/
+
+# Personal documents accidentally placed at the repo root
+In-Person_Identification_Form.pdf

@@ -1,0 +1,58 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: archive-qdrant
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: archive-ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  ollama-models:
+    image: ollama/ollama:latest
+    container_name: archive-ollama-models
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until ollama list >/dev/null 2>&1; do sleep 2; done;
+        ollama pull nomic-embed-text:latest;
+        ollama pull qwen2.5:14b
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: "no"
+
+  paddleocr:
+    build:
+      context: ./ocr
+    image: archive-paddleocr:latest
+    container_name: archive-paddleocr
+    environment:
+      OCR_RENDER_MAX_SIDE: ${OCR_RENDER_MAX_SIDE:-3000}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - paddleocr_models:/root/.paddlex
+      - ${SOURCE_DIR:-./data/source}:/work/source
+      - ${SEARCHABLE_DIR:-./data/searchable}:/work/searchable
+    command: ["python", "/work/paddleocr_runner.py", "--serve", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  ollama_data:
+  paddleocr_models:
