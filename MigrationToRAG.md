@@ -2,7 +2,7 @@
 
 ## Goal
 
-Shift `/home/runner/work/archive_manager/archive_manager` from a parser-first, query-intent-heavy architecture to a RAG-first architecture, while preserving deterministic enforcement for authorization, event scoping, and a small set of exact utility queries.
+Shift this repository from a parser-first, query-intent-heavy architecture to a RAG-first architecture, while preserving deterministic enforcement for authorization, event scoping, and a small set of exact utility queries.
 
 ## 1. Define the target architecture boundary
 
@@ -13,11 +13,11 @@ Make `query.py` the primary orchestration layer for all non-trivial questions, w
 - broad-scope clarification
 - exact numeric or reporting queries that must remain non-LLM
 
-This fits the current structure because `answer()` already separates planning, deterministic routing, retrieval, and response generation in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:1407-1592`, and the current deterministic handler registry is isolated in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:1204-1354` and `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query_handlers.py:10-25`.
+This fits the current structure because `answer()` already separates planning, deterministic routing, retrieval, and response generation in `src/archive_manager/retrieval/query.py:1407-1592`, and the current deterministic handler registry is isolated in `src/archive_manager/retrieval/query.py:1204-1354` and `src/archive_manager/retrieval/query_handlers.py:10-25`.
 
 ## 2. Shrink the query planner from intent catalog to routing policy
 
-Refactor the planner in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query_planner.py:8-181` so it no longer tries to classify many business-specific intents such as `performed_services`, `repair_cause_inventory`, `label_values_inventory`, and similar service-record-specific variants.
+Refactor the planner in `src/archive_manager/retrieval/query_planner.py:8-181` so it no longer tries to classify many business-specific intents such as `performed_services`, `repair_cause_inventory`, `label_values_inventory`, and similar service-record-specific variants.
 
 Replace that large intent taxonomy with a smaller routing model such as:
 
@@ -27,16 +27,16 @@ Replace that large intent taxonomy with a smaller routing model such as:
 - broad query requiring narrowing
 - multi-document summary query
 
-This removes the need to keep expanding regex rules as new record types are added. It also decouples future document families from planner maintenance. The current evaluation harness is tightly coupled to exact expected intents in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/evaluation/evaluation.py:19-34`, so that evaluation model should also be simplified during this phase.
+This removes the need to keep expanding regex rules as new record types are added. It also decouples future document families from planner maintenance. The current evaluation harness is tightly coupled to exact expected intents in `src/archive_manager/evaluation/evaluation.py:19-34`, so that evaluation model should also be simplified during this phase.
 
 ## 3. Recast deterministic parsing as optional enrichment, not the main answer path
 
 Today, automotive and domain parsers are central to many answers:
 
-- automotive parser: `/home/runner/work/archive_manager/archive_manager/src/archive_manager/domain/automotive_parser.py:41-280`
-- domain parser registry: `/home/runner/work/archive_manager/archive_manager/src/archive_manager/domain/domain_parsers.py:71-111`
-- ingest-time EventFacts extraction: `/home/runner/work/archive_manager/archive_manager/src/archive_manager/core/event_facts.py:20-64`
-- EventFacts persistence and use: `/home/runner/work/archive_manager/archive_manager/src/archive_manager/core/event_facts.py:67-84`, `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:268-320`, and `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:494-520`
+- automotive parser: `src/archive_manager/domain/automotive_parser.py:41-280`
+- domain parser registry: `src/archive_manager/domain/domain_parsers.py:71-111`
+- ingest-time EventFacts extraction: `src/archive_manager/core/event_facts.py:20-64`
+- EventFacts persistence and use: `src/archive_manager/core/event_facts.py:67-84`, `src/archive_manager/retrieval/query.py:268-320`, and `src/archive_manager/retrieval/query.py:494-520`
 
 Keep these components, but change their role:
 
@@ -50,25 +50,25 @@ This is the key maintenance win: new document types should still be usable throu
 
 The current ingestion pipeline already has the right backbone:
 
-- normalization, OCR, text extraction, chunking, embedding, and Qdrant upsert in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/ingestion/ingest.py:533-758`
-- OCR adapter boundary in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/ingestion/ocr_adapters.py:20-122`
+- normalization, OCR, text extraction, chunking, embedding, and Qdrant upsert in `src/archive_manager/ingestion/ingest.py:533-758`
+- OCR adapter boundary in `src/archive_manager/ingestion/ocr_adapters.py:20-122`
 
 The migration should focus ingestion on retrieval quality:
 
 - improve chunk metadata stored with each Qdrant point
 - preserve event, document, and page provenance
 - attach normalized manifest and domain fields when available
-- prepare for layout-aware retrieval using the existing `.ocr.json` sidecar contract referenced in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/ingestion/ocr_adapters.py:28`, `79`, and `103-104`
+- prepare for layout-aware retrieval using the existing `.ocr.json` sidecar contract referenced in `src/archive_manager/ingestion/ocr_adapters.py:28`, `79`, and `103-104`
 
-In practice, the chunk payload created in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/ingestion/ingest.py:694-718` should become the primary long-term contract, and file-based caches should become secondary implementation details.
+In practice, the chunk payload created in `src/archive_manager/ingestion/ingest.py:694-718` should become the primary long-term contract, and file-based caches should become secondary implementation details.
 
 ## 5. Replace hybrid retrieval as a special case with retrieval as the default
 
 Right now, only free-text queries clearly use hybrid retrieval:
 
-- dense retrieval from Qdrant via `qdrant_search()` in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/ingestion/ingest.py:398-412`
-- lexical retrieval via `lexical_search()` in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/hybrid_retrieval.py:8-39`
-- retrieval merge and filtering in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:1450-1479`
+- dense retrieval from Qdrant via `qdrant_search()` in `src/archive_manager/ingestion/ingest.py:398-412`
+- lexical retrieval via `lexical_search()` in `src/archive_manager/retrieval/hybrid_retrieval.py:8-39`
+- retrieval merge and filtering in `src/archive_manager/retrieval/query.py:1450-1479`
 
 Make this retrieval stack the default for most user questions. Extend it so that:
 
@@ -81,7 +81,7 @@ This is where the largest architectural shift should occur.
 
 ## 6. Introduce record-aware RAG as the main multi-document strategy
 
-The code already has a useful precedent in `_group_sources_into_records()` and `_document_balanced_hits()` in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:242-265` and `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:323-343`.
+The code already has a useful precedent in `_group_sources_into_records()` and `_document_balanced_hits()` in `src/archive_manager/retrieval/query.py:242-265` and `src/archive_manager/retrieval/query.py:323-343`.
 
 Promote that idea:
 
@@ -98,10 +98,10 @@ Do not move these responsibilities into the model layer.
 
 Preserve:
 
-- visibility rules in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/security/access_policy.py:7-32`
-- authorized hit filtering in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/retrieval/query.py:1370-1390`
-- audit logging in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/lifecycle/audit.py:14-32`
-- trace logging in `/home/runner/work/archive_manager/archive_manager/src/archive_manager/lifecycle/trace_log.py:22-41`
+- visibility rules in `src/archive_manager/security/access_policy.py:7-32`
+- authorized hit filtering in `src/archive_manager/retrieval/query.py:1370-1390`
+- audit logging in `src/archive_manager/lifecycle/audit.py:14-32`
+- trace logging in `src/archive_manager/lifecycle/trace_log.py:22-41`
 
 RAG-first should change how evidence is selected and summarized, not who is allowed to see it.
 
@@ -109,9 +109,9 @@ RAG-first should change how evidence is selected and summarized, not who is allo
 
 Today the system depends on:
 
-- ingest cache: `/home/runner/work/archive_manager/archive_manager/src/archive_manager/ingestion/ingest.py:94-121`
-- searchable sidecars and derived PDFs: `/home/runner/work/archive_manager/archive_manager/src/archive_manager/ingestion/ingest.py:592-634`
-- EventFacts cache: `/home/runner/work/archive_manager/archive_manager/src/archive_manager/core/event_facts.py:67-84`
+- ingest cache: `src/archive_manager/ingestion/ingest.py:94-121`
+- searchable sidecars and derived PDFs: `src/archive_manager/ingestion/ingest.py:592-634`
+- EventFacts cache: `src/archive_manager/core/event_facts.py:67-84`
 
 Migration goal:
 
@@ -126,8 +126,8 @@ That avoids ongoing cache-structure churn every time a new document family intro
 
 Current evaluation is built around expected planner intents and answer substrings in:
 
-- `/home/runner/work/archive_manager/archive_manager/src/archive_manager/evaluation/evaluation.py:12-51`
-- `/home/runner/work/archive_manager/archive_manager/src/archive_manager/evaluation/evaluate_queries.py:11-21`
+- `src/archive_manager/evaluation/evaluation.py:12-51`
+- `src/archive_manager/evaluation/evaluate_queries.py:11-21`
 
 For a RAG-first system, evaluation should instead emphasize:
 
@@ -200,4 +200,4 @@ Do not replace the current architecture wholesale. Re-center it.
 
 Keep the existing ingestion backbone, authorization model, manifests, Qdrant storage, and audit and trace systems. Migrate the query layer so that RAG is the default path, and treat parsers plus EventFacts as optional enrichment and validation layers rather than the primary answering mechanism.
 
-That gives you lower maintenance as document types expand, without sacrificing the strongest control points already present in `/home/runner/work/archive_manager/archive_manager`.
+That gives you lower maintenance as document types expand, without sacrificing the strongest control points already present in this repository.
