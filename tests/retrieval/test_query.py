@@ -95,6 +95,67 @@ class QueryFilenameSearchTest(unittest.TestCase):
         self.assertTrue(query._is_source_inventory_request("Generate the names of the files processed thus far"))
         self.assertFalse(query._is_source_inventory_request("What is in IMG_0944.png?"))
 
+    def test_source_for_qdrant_doc_id_returns_indexed_filename(self):
+        with patch.object(query, "load_ingest_cache", return_value={}), patch.object(
+            query,
+            "qdrant_search_by_doc_id",
+            return_value=[{"payload": {"source": "pharmtech_quiz_Lesson_8_2025-09-23.pdf"}}],
+        ):
+            self.assertEqual(
+                query._source_for_doc_id("what is the file with doc_id=abc123456789012345?"),
+                ["pharmtech_quiz_Lesson_8_2025-09-23.pdf"],
+            )
+
+    def test_document_date_inventory_matches_underscore_delimited_filename_dates(self):
+        with patch.object(
+            query,
+            "load_indexed_sources",
+            return_value=[
+                "pharmtech_quiz_Lesson_1_2025-09-11.pdf",
+                "pharmtech_quiz_Lesson_8_2025-09-23.pdf",
+                "pharmtech_quiz_Lesson_11_2025-09-27.pdf",
+                "repair-2025-11-25.png.pdf",
+            ],
+        ):
+            self.assertEqual(
+                query._document_dates_from_sources("List the dates for the PharmTech quizes"),
+                ["2025-09-11", "2025-09-23", "2025-09-27"],
+            )
+
+    def test_quiz_question_inventory_keeps_first_questions_per_source(self):
+        with patch.object(query, "ollama_embed_text", return_value=[0.1]), patch.object(
+            query,
+            "qdrant_search",
+            return_value={
+                "result": [
+                    {"payload": {"source": "pharmtech_quiz_Lesson_1_2025-09-11.pdf"}},
+                    {"payload": {"source": "pharmtech_quiz_Lesson_8_2025-09-23.pdf"}},
+                    {"payload": {"source": "pharmtech_quiz_Lesson_11_2025-09-27.pdf"}},
+                ]
+            },
+        ):
+            records = query._quiz_questions_from_sources("List the first 5 questions from each PharmTech quize", limit=5)
+        self.assertEqual(len(records), 3)
+        self.assertTrue(all(len(questions) == 5 for _source, questions in records))
+        self.assertTrue(all(label.startswith("Question ") for _source, questions in records for label, _entries in questions))
+
+    def test_quiz_question_inventory_can_select_last_questions(self):
+        with patch.object(query, "ollama_embed_text", return_value=[0.1]), patch.object(
+            query,
+            "qdrant_search",
+            return_value={
+                "result": [
+                    {"payload": {"source": "pharmtech_quiz_Lesson_1_2025-09-11.pdf"}},
+                    {"payload": {"source": "pharmtech_quiz_Lesson_8_2025-09-23.pdf"}},
+                    {"payload": {"source": "pharmtech_quiz_Lesson_11_2025-09-27.pdf"}},
+                ]
+            },
+        ):
+            records = query._quiz_questions_from_sources("List the last 3 questions from each PharmTech quize")
+        self.assertEqual(len(records), 3)
+        self.assertTrue(all(len(questions) == 3 for _source, questions in records))
+        self.assertTrue(all(label.startswith("Question ") for _source, questions in records for label, _entries in questions))
+
     def test_broad_query_requires_scope(self):
         self.assertTrue(query._is_broad_query("Tell me about the archive"))
         self.assertFalse(query._is_broad_query("What is in IMG_0944.png?"))

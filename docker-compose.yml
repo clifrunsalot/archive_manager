@@ -31,7 +31,8 @@ services:
       - >-
         until ollama list >/dev/null 2>&1; do sleep 2; done;
         ollama pull nomic-embed-text:latest;
-        ollama pull qwen2.5:14b
+        ollama pull qwen2.5:14b;
+        ollama pull qwen2.5-coder:7b
     volumes:
       - ollama_data:/root/.ollama
     restart: "no"

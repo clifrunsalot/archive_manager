@@ -79,6 +79,20 @@ class DeleteEventTest(unittest.TestCase):
             self.assertFalse((searchable / "abc.txt").exists())
             self.assertNotIn("event-1", load_manifests(manifest_path))
 
+    def test_delete_verification_fails_when_derived_data_remains(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            for directory in (root / "archive", root / "source", root / "searchable"):
+                directory.mkdir()
+            (root / "searchable" / "abc.txt").write_text("still present", encoding="utf-8")
+            with (
+                patch.object(delete_event, "ARCHIVE_DIR", root / "archive"),
+                patch.object(delete_event, "SOURCE_DIR", root / "source"),
+                patch.object(delete_event, "SEARCHABLE_DIR", root / "searchable"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Deletion verification failed"):
+                    delete_event.verify_deleted_local_data([], ["abc"], {"abc": "page.jpg"})
+
 
 if __name__ == "__main__":
     unittest.main()

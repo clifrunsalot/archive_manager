@@ -1,6 +1,6 @@
 import unittest
 
-from archive_manager.retrieval.query_planner import plan_query
+from archive_manager.retrieval.query_planner import plan_query, route_query
 
 
 class QueryPlannerTest(unittest.TestCase):
@@ -102,10 +102,27 @@ class QueryPlannerTest(unittest.TestCase):
         self.assertTrue(plan_query("services not performed, order by cost lowest to highest").sort_by_cost)
         self.assertEqual(plan_query("What are the service dates saved in the archive?").intent, "service_date_inventory")
         self.assertEqual(plan_query("summarize every service record").intent, "multi_event_summary")
+        self.assertEqual(plan_query("List the dates for the PharmTech quizes").intent, "document_date_inventory")
+        self.assertEqual(plan_query("List the first 5 questions from each PharmTech quize").intent, "quiz_question_inventory")
+        self.assertEqual(
+            plan_query("List the last 3 questions from each PharmTech quize").requested_fields,
+            ("last_question",),
+        )
+        table_plan = plan_query("Summarize each car service inside a table and include a combined total of all services at the bottom of the table")
+        self.assertEqual(table_plan.intent, "performed_services_inventory")
+        self.assertTrue(table_plan.include_total_cost)
+        self.assertTrue(table_plan.include_grand_total)
 
     def test_free_text_requires_llm(self):
         self.assertEqual(plan_query("What does the archive say about brakes?").intent, "free_text")
         self.assertTrue(plan_query("What does the archive say about brakes?").requires_llm)
+
+    def test_route_query_uses_small_closed_world_routing_policy(self):
+        self.assertEqual(route_query("list processed files"), "deterministic_utility")
+        self.assertEqual(route_query("total charges on Sep 12 2024"), "constrained_exact_query")
+        self.assertEqual(route_query("summarize every service record"), "multi_document_summary")
+        self.assertEqual(route_query("What does the archive say about brakes?"), "rag")
+        self.assertEqual(route_query("What is in the archive?"), "broad_scope")
 
 
 if __name__ == "__main__":

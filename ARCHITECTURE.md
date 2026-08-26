@@ -199,25 +199,51 @@ works without the persistent service running.
 
 ## Query Layer
 
-`query.py` provides the query orchestration:
+`query.py` is the runtime orchestration layer for archive questions. The
+preferred pattern is a small routing policy, not an expanding business-specific
+intent catalog.
 
-`query_planner.py` first classifies each question into a typed intent such as
-`total_charges`, `performed_services`, `service_date_inventory`,
-`total_charges_inventory`, `multi_event_summary`, or `free_text`. Deterministic
-intents bypass embeddings and the LLM. Free-text requests use hybrid lexical
-plus dense retrieval before LLM synthesis.
+The active routing abstraction is a compact policy with categories such as:
 
-Deterministic intents are dispatched through the `QueryHandlerRegistry` in
-`query_handlers.py`. The registry is the extension point for new closed-world
-operations; `answer()` no longer owns a growing chain of deterministic intent
-conditionals. The legacy private intent predicates remain only as compatibility
-wrappers where tests or external callers may use them.
+- `deterministic_utility`
+- `constrained_exact_query`
+- `multi_document_summary`
+- `broad_scope`
+- `rag`
 
-- Source inventory requests are handled without the embedding model or LLM.
-- Broad archive-wide questions request a narrower scope.
-- Filename and filename-regex matches are prioritized.
-- Manifest events are grouped separately from legacy invoice grouping.
-- All pages in a manifest event are retrieved for complete-event context.
+This policy is implemented in `query_planner.py` and is intentionally smaller
+than the older automotive/service-specific intent taxonomy. The legacy
+`plan_query()` function remains as a compatibility adapter for exact deterministic
+queries and older tests, but the migration goal is to treat routing as the main
+boundary and keep domain-specific intent expansion out of the planner.
+
+The runtime flow is:
+
+1. route the question to one of the small policy buckets
+2. enforce authorization and manifest scoping before retrieval
+3. retrieve relevant evidence using lexical + dense + exact source matches
+4. group manifest-backed records when available and preserve page ordering
+5. synthesize the answer from retrieved excerpts only
+6. optionally validate or enrich with parser/EventFacts metadata if useful
+
+Deterministic dispatch remains in the `QueryHandlerRegistry` in
+`query_handlers.py`, but only for a small closed-world set of operations such as:
+
+- authorization-aware source inventory
+- exact numeric or reporting queries that must remain non-LLM
+- manifest and event lookup
+- scope narrowing and clarification
+- admin and lifecycle utilities
+
+General content questions default to hybrid retrieval and grounded synthesis.
+Filename and filename-regex matches remain high-priority evidence sources, and
+manifest-backed events are grouped before synthesis so page ordering and event
+bounds remain intact.
+
+This is the key architectural shift: parsers, EventFacts, and domain-specific
+logic are optional enrichment layers, not the default answer path. New document
+families should still be answerable through retrieval even before a dedicated
+parser exists.
 - Event domains select deterministic parsers.
 - EventFacts are extracted during ingestion and reused by manifest-backed queries.
 - Arithmetic reconciliation compares parsed line totals with declared invoice totals.

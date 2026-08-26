@@ -1,5 +1,33 @@
 import unittest
 
+from ocr.paddleocr_runner import _quality_report
+
+
+class PaddleOCRQualityReportTest(unittest.TestCase):
+    def test_quality_report_is_domain_neutral(self):
+        report = _quality_report([
+            {
+                "page": 1,
+                "elements": [
+                    {"text": "Invoice", "confidence": 0.9},
+                    {"text": "Total", "confidence": 0.6},
+                ],
+            },
+            {"page": 2, "elements": []},
+        ])
+
+        self.assertEqual(report["page_count"], 2)
+        self.assertEqual(report["empty_pages"], 1)
+        self.assertEqual(report["low_confidence_elements"], 1)
+        self.assertEqual(report["mean_confidence"], 0.75)
+        self.assertEqual(report["pages"][1]["mean_confidence"], None)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+import unittest
+
 from ocr.paddleocr_runner import _result_elements
 
 

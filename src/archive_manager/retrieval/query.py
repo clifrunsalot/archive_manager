@@ -31,15 +31,17 @@ from archive_manager.ingestion.ingest import (
     qdrant_search,
     qdrant_list_sources,
     qdrant_search_by_source,
+    qdrant_search_by_doc_id,
     qdrant_search_by_source_embedding,
     extract_pages_text_pdfplumber,
 )
 from archive_manager.domain.automotive_parser import extract_automotive_facts, extract_labeled_values, extract_not_performed_services, extract_not_performed_service_costs, extract_performed_services, extract_service_advisor, extract_service_causes
-from archive_manager.security.access_policy import authorized_event_ids, is_authorized
+from archive_manager.security.access_policy import authorized_event_ids, is_source_authorized, is_authorized
+from archive_manager.security.security_config import validate_sensitive_configuration
 from archive_manager.lifecycle.audit import record_query_audit
 from archive_manager.domain.domain_parsers import get_parser
 from archive_manager.core.event_facts import load_event_facts
-from archive_manager.retrieval.query_planner import plan_query
+from archive_manager.retrieval.query_planner import plan_query, route_query
 from archive_manager.domain.response_validation import validate_summary
 from archive_manager.retrieval.hybrid_retrieval import lexical_search
 from archive_manager.lifecycle.trace_log import new_run_id, trace_event
@@ -861,7 +863,7 @@ def _sort_service_records_by_cost(records):
     )
 
 
-def _format_performed_services_markdown_table(records, include_total_cost: bool = False, cost_first: bool = False) -> str:
+def _format_performed_services_markdown_table(records, include_total_cost: bool = False, cost_first: bool = False, include_grand_total: bool = False) -> str:
     """Render grouped performed services as a GitHub-Flavored Markdown table."""
     if not records:
         return "No performed car services were found in the archive."
@@ -879,6 +881,9 @@ def _format_performed_services_markdown_table(records, include_total_cost: bool 
     if cost_first and include_total_cost:
         headers = ["Total Charges", "Service Date", "Services Performed"]
         rows = [[row[2], row[0], row[1]] for row in rows]
+    if include_total_cost and include_grand_total:
+        combined_total = _sum_total_charges([(record[0], record[2]) for record in records if len(record) > 2])
+        rows.append(["Combined Total", "", f"${combined_total}"] if not cost_first else [f"${combined_total}", "Combined Total", ""])
     lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
     lines.extend("| " + " | ".join(row) + " |" for row in rows)
     return "\n".join(lines)
@@ -1201,6 +1206,124 @@ def _format_source_inventory(sources):
     return "Processed files:\n" + "\n".join(f"- {source}" for source in sources)
 
 
+def _document_dates_from_sources(question: str) -> list[str]:
+    """Extract ISO dates from filenames matching the named document family."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", question.lower())
+    ignored = {"list", "show", "give", "what", "are", "the", "dates", "date", "for", "of", "in"}
+    keywords = {word for word in normalized.split() if len(word) > 2 and word not in ignored}
+    keywords = {"quiz" if word in {"quizes", "quizzes"} else word for word in keywords}
+    sources = _authorized_sources(load_indexed_sources())
+    if not sources:
+        sources = _authorized_sources(qdrant_list_sources())
+    dates = set()
+    for source in sources:
+        source_lower = source.lower()
+        if keywords and not all(keyword in source_lower for keyword in keywords):
+            continue
+        match = re.search(r"(20\d{2})-(\d{2})-(\d{2})", source)
+        if match:
+            dates.add("-".join(match.groups()))
+    return sorted(dates)
+
+
+def _quiz_questions_from_sources(question: str, limit: int = 5) -> list[tuple[str, list[str]]]:
+    """Retrieve quiz sources, then return ordered questions from each source."""
+    count_match = re.search(r"\b(?:first|initial|last)\s+(\d+)\s+questions?\b", question, re.IGNORECASE)
+    limit = int(count_match.group(1)) if count_match else limit
+    last_questions = bool(re.search(r"\blast\s+\d+\s+questions?\b", question, re.IGNORECASE))
+    cache = load_ingest_cache()
+    query_embedding = ollama_embed_text(question)
+    dense_hits = qdrant_search(query_embedding, top_k=max(50, limit * 10)).get("result", [])
+    lexical_hits = lexical_search(question, cache, SEARCHABLE_DIR, limit=max(50, limit * 10))
+    retrieved_sources = {
+        str(hit.get("payload", {}).get("source", "")).strip()
+        for hit in [*dense_hits, *lexical_hits]
+        if hit.get("payload", {}).get("source")
+    }
+    matching_sources = [
+        source for source in _authorized_sources(retrieved_sources)
+        if "quiz" in source.casefold() or "pharmtech" in source.casefold()
+    ]
+    matching_sources.sort(key=str.casefold)
+    records = []
+    for source in matching_sources:
+        values = _extract_inline_label_values(_source_texts(source, cache))
+        questions = [
+            (label, entries)
+            for label, entries in values.items()
+            if re.match(r"Question\s+\d+\s*:", label, re.IGNORECASE)
+        ]
+        questions.sort(key=lambda item: int(re.search(r"\d+", item[0]).group(0)))
+        if questions:
+            records.append((source, questions[-limit:] if last_questions else questions[:limit]))
+    return records
+
+
+def _format_quiz_questions(records: list[tuple[str, list[tuple[str, list[str]]]]]) -> str:
+    if not records:
+        return "No quiz questions were found in the archive."
+    lines = []
+    for source, questions in records:
+        lines.append(f"Questions from {source}:")
+        lines.extend(f"- {label}" for label, _entries in questions)
+    return "\n".join(lines)
+
+
+def _quiz_topic_from_question(question: str) -> str | None:
+    match = re.search(r"\bquestion\s+on\s+(.+?)\s*\??$", question, re.IGNORECASE)
+    return match.group(1).strip(" .?!") if match else None
+
+
+def _quiz_sources_for_topic(question: str) -> list[tuple[str, list[str]]]:
+    """Use lexical and dense retrieval to find quiz sources containing a topic."""
+    topic = _quiz_topic_from_question(question)
+    if not topic:
+        return []
+    cache = load_ingest_cache()
+    query_embedding = ollama_embed_text(topic)
+    dense_hits = qdrant_search(query_embedding, top_k=50).get("result", [])
+    lexical_hits = lexical_search(topic, cache, SEARCHABLE_DIR, limit=50)
+    sources = sorted({
+        str(hit.get("payload", {}).get("source", "")).strip()
+        for hit in [*dense_hits, *lexical_hits]
+        if hit.get("payload", {}).get("source")
+        and "quiz" in str(hit["payload"].get("source", "")).casefold()
+    }, key=str.casefold)
+    records = []
+    for source in _authorized_sources(sources):
+        values = _extract_inline_label_values(_source_texts(source, cache))
+        questions = [label for label in values if re.search(re.escape(topic), label, re.IGNORECASE)]
+        if questions:
+            records.append((source, questions))
+    return records
+
+
+def _format_quiz_topic_sources(records: list[tuple[str, list[str]]]) -> str:
+    if not records:
+        return "No quiz containing that question topic was found in the archive."
+    lines = []
+    for source, questions in records:
+        lines.append(f"{source}:")
+        lines.extend(f"- {question}" for question in questions)
+    return "\n".join(lines)
+
+
+def _source_for_doc_id(question: str) -> list[str]:
+    match = re.search(r"\bdoc[_ ]?id\s*[=:]\s*([a-f0-9]{16,})\b", question, re.IGNORECASE)
+    if not match:
+        return []
+    doc_id = match.group(1).lower()
+    cache = load_ingest_cache()
+    sources = [source for cached_id, source in cache.items() if cached_id.lower() == doc_id]
+    if not sources:
+        sources = [
+            str(point.get("payload", {}).get("source", ""))
+            for point in qdrant_search_by_doc_id(doc_id)
+            if point.get("payload", {}).get("source")
+        ]
+    return list(dict.fromkeys(sources))
+
+
 def _deterministic_handlers() -> QueryHandlerRegistry:
     """Build the registered deterministic handler set."""
     registry = QueryHandlerRegistry()
@@ -1220,6 +1343,37 @@ def _deterministic_handlers() -> QueryHandlerRegistry:
         answer_text = _format_service_date_inventory(dates)
         record_query_audit(question, hit_count=len(dates), outcome="service_date_inventory")
         trace_event(run_id, "service_date_inventory", "END", status="completed", answer=answer_text, dates=dates)
+        return answer_text
+
+    def document_date_inventory(question, plan, run_id):
+        dates = _document_dates_from_sources(question)
+        answer_text = (
+            "Document dates:\n" + "\n".join(f"- {date}" for date in dates)
+            if dates else "No matching document dates were found in the archive."
+        )
+        record_query_audit(question, hit_count=len(dates), outcome="document_date_inventory")
+        trace_event(run_id, "document_date_inventory", "END", status="completed", answer=answer_text, dates=dates)
+        return answer_text
+
+    def quiz_question_inventory(question, plan, run_id):
+        records = _quiz_questions_from_sources(question)
+        answer_text = _format_quiz_questions(records)
+        record_query_audit(question, hit_count=sum(len(questions) for _source, questions in records), outcome="quiz_question_inventory")
+        trace_event(run_id, "quiz_question_inventory", "END", status="completed", answer=answer_text, records=records)
+        return answer_text
+
+    def quiz_topic_source(question, plan, run_id):
+        records = _quiz_sources_for_topic(question)
+        answer_text = _format_quiz_topic_sources(records)
+        record_query_audit(question, hit_count=len(records), outcome="quiz_topic_source")
+        trace_event(run_id, "quiz_topic_source", "END", status="completed", answer=answer_text, records=records)
+        return answer_text
+
+    def source_by_doc_id(question, plan, run_id):
+        sources = _source_for_doc_id(question)
+        answer_text = _format_source_inventory(sources)
+        record_query_audit(question, hit_count=len(sources), outcome="source_by_doc_id")
+        trace_event(run_id, "source_by_doc_id", "END", status="completed", answer=answer_text, sources=sources)
         return answer_text
 
     def total_charges(question, plan, run_id):
@@ -1256,7 +1410,7 @@ def _deterministic_handlers() -> QueryHandlerRegistry:
         if plan.sort_by_cost:
             records = _sort_service_records_by_cost(records)
         diagram_formatters = {
-            "markdown_table": lambda: _format_performed_services_markdown_table(records, plan.include_total_cost, plan.cost_first),
+            "markdown_table": lambda: _format_performed_services_markdown_table(records, plan.include_total_cost, plan.cost_first, plan.include_grand_total),
             "ascii_table": lambda: _format_performed_services_ascii_table(records, plan.include_total_cost, plan.cost_first),
             "flowchart": lambda: _format_performed_services_flowchart(records, plan.include_total_cost),
             "sequence_diagram": lambda: _format_performed_services_sequence_diagram(records, plan.include_total_cost),
@@ -1340,6 +1494,10 @@ def _deterministic_handlers() -> QueryHandlerRegistry:
     for intent, handler in {
         "source_inventory": source_inventory,
         "service_date_inventory": service_date_inventory,
+        "document_date_inventory": document_date_inventory,
+        "quiz_question_inventory": quiz_question_inventory,
+        "quiz_topic_source": quiz_topic_source,
+        "source_by_doc_id": source_by_doc_id,
         "total_charges": total_charges,
         "total_charges_inventory": total_charges_inventory,
         "performed_services": performed_services,
@@ -1374,7 +1532,7 @@ def _authorized_sources(sources):
     result = []
     for source in sources:
         manifest = find_manifest_for_source(manifests, source)
-        if manifest is None or manifest.event_id in visible:
+        if is_source_authorized(manifest) and (manifest is None or manifest.event_id in visible):
             result.append(source)
     return result
 
@@ -1385,8 +1543,15 @@ def _filter_authorized_hits(hits):
     visible = authorized_event_ids(manifests)
     return [
         hit for hit in hits
-        if not hit.get("payload", {}).get("event_id")
-        or hit.get("payload", {}).get("event_id") in visible
+        if (
+            is_source_authorized(
+                find_manifest_for_source(manifests, str(hit.get("payload", {}).get("source", "")))
+            )
+            and (
+                not hit.get("payload", {}).get("event_id")
+                or hit.get("payload", {}).get("event_id") in visible
+            )
+        )
     ]
 
 
@@ -1412,7 +1577,9 @@ def answer(question: str, top_k: int = 10, max_excerpt_chars: int = 1200, verbos
     based only on that retrieved context.
     """
     start_total = time.perf_counter()
+    validate_sensitive_configuration()
     query_plan = plan_query(question)
+    runtime_route = route_query(question)
     run_id = new_run_id("query")
     trace_event(
         run_id,
@@ -1421,11 +1588,14 @@ def answer(question: str, top_k: int = 10, max_excerpt_chars: int = 1200, verbos
         question=question,
         intent=query_plan.intent,
         requires_llm=query_plan.requires_llm,
+        route=runtime_route,
     )
+    if runtime_route == "broad_scope" and query_plan.intent == "free_text":
+        return _clarification_for_broad_query()
     handler = _deterministic_handlers().get(query_plan.intent)
     if handler is not None:
         return handler(question, query_plan, run_id)
-    document_summary = query_plan.intent == "multi_event_summary"
+    document_summary = query_plan.intent == "multi_event_summary" or runtime_route == "multi_document_summary"
     document_sources = []
     record_groups = []
     if document_summary:

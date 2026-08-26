@@ -1,5 +1,36 @@
 # Archive Processing Pipeline
 
+Security hardening tasks are tracked in [SECURITY_CHECKLIST.md](SECURITY_CHECKLIST.md).
+
+For sensitive documents, enable fail-closed security checks before starting
+ingestion or querying:
+
+```bash
+export ARCHIVE_SECURITY_MODE=sensitive
+export ARCHIVE_AUTH_MODE=strict
+export ARCHIVE_AUDIT_USER=your-user
+export ARCHIVE_ENCRYPTION_KEY="$(.venv/bin/python -c 'from archive_manager.core.encryption import generate_key; print(generate_key())')"
+export QDRANT_API_KEY=local-secret
+export OLLAMA_BASE=http://localhost:11434
+export PADDLEOCR_SERVICE_URL=http://localhost:8000
+```
+
+Sensitive mode rejects missing encryption or Qdrant keys and non-local model
+or OCR service endpoints.
+
+Apply owner-only permissions to local sensitive storage with:
+
+```bash
+./scripts/secure-permissions.sh
+```
+
+Remove generated logs and report artifacts before sensitive ingestion with the
+confirmation-gated command:
+
+```bash
+./scripts/secure-cleanup.sh
+```
+
 This project ingests documents into a searchable archive and supports semantic retrieval over the stored content. The pipeline watches a directory for new files, normalizes them into a usable PDF form, extracts text, chunks it, embeds the content, and stores both vector embeddings and source metadata in Qdrant.
 
 It also supports an optional local report-export mode for query results. When enabled, the system saves a clean Markdown report to a local output directory such as `artifact_output`, using only the retrieved evidence that supported the answer. This keeps the feature opt-in and safe for local-only use.
@@ -23,7 +54,20 @@ docker compose up -d --build
 
 This starts Qdrant and Ollama, builds the local PaddleOCR image, and downloads the required Ollama models. The model download service exits when both downloads finish; the Qdrant, Ollama, and PaddleOCR services remain available.
 
-### 3. Manual setup without Compose
+### 3. Stop all project containers
+
+Use the project teardown script when stopping the services. It also removes the
+`archive-anythingllm` container when present, because that container can keep the
+Compose network in use after `docker compose down`.
+
+```bash
+./scripts/docker-down.sh
+```
+
+Set `ANYTHINGLLM_CONTAINER` if the separately managed container has a different
+name. The script removes containers but does not delete named data volumes.
+
+### 4. Manual setup without Compose
 
 Use this alternative when you want to start each service separately. Start
 Docker Desktop first, then run these commands from the project directory:
@@ -44,12 +88,13 @@ docker run -d \
 docker build -t archive-paddleocr:latest ./ocr
 ollama pull nomic-embed-text:latest
 ollama pull qwen2.5:14b
+ollama pull qwen2.5-coder:7b
 ```
 
 If the containers already exist, start them with `docker start archive-qdrant
 archive-ollama` instead of creating them again.
 
-### 4. Set local environment variables
+### 5. Set local environment variables
 
 These values are optional if you are using the defaults, but they are the correct variables to set when overriding the local configuration:
 
@@ -458,16 +503,21 @@ are retrieved and passed to the automotive fact extractor. The extractor checks
 common total labels such as `TOTAL CHARGES`, `TOTAL COSTS`, `TOTAL AMOUNT`, and
 `AMOUNT DUE`, preferring an invoice-level total over `PLEASE PAY` or line totals.
 
-The typed query planner routes precise date, performed-service, and total-charge
-questions to deterministic handlers. It accepts ISO, numeric, written, and
-compact invoice date formats. Archive-wide total-charge questions return one
-authoritative total per grouped service record without invoking embeddings or
-the LLM. Open-ended questions use hybrid lexical and dense retrieval followed
-by validated model synthesis.
+The query layer is intentionally small and routing-driven. The runtime now
+classifies questions into a compact policy such as deterministic utility,
+constrained exact query, multi-document summary, broad-scope clarification, or
+normal RAG retrieval. This keeps the planner stable as new document types appear
+without forcing a new regex branch for every business-specific record family.
 
-Deterministic operations are registered through the query handler registry rather
-than implemented as a growing conditional chain. New closed-world operations
-should add a planner intent, handler, and evaluation cases.
+Exact reporting, source inventory, authorization gating, and manifest lookups
+remain deterministic and are dispatched through the query handler registry. The
+general case uses hybrid lexical + dense retrieval, exact filename matching,
+manifest grouping, and grounded synthesis from retrieved excerpts only.
+
+This design keeps the closed-world enforcement path small and predictable while
+making retrieval the default answer path for most archive questions. Parsers and
+persisted EventFacts remain available for validation and enrichment, but they are
+not the default mechanism for answering general content questions.
 
 ### Graphical output formats
 

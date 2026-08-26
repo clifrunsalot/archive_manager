@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from archive_manager.security.access_policy import authorized_event_ids, is_authorized
+from archive_manager.security.access_policy import authorized_event_ids, is_authorized, is_source_authorized
 from archive_manager.core.event_model import EventManifest
 
 
@@ -23,6 +23,13 @@ class AccessPolicyTest(unittest.TestCase):
 
         with patch.dict(os.environ, {"ARCHIVE_AUTH_MODE": "strict", "ARCHIVE_AUDIT_USER": "alice"}, clear=False):
             self.assertTrue(is_authorized(manifest))
+
+    def test_strict_mode_denies_unmanifested_sources(self):
+        with patch.dict(os.environ, {"ARCHIVE_AUTH_MODE": "strict"}, clear=False):
+            self.assertFalse(is_source_authorized(None))
+
+        with patch.dict(os.environ, {"ARCHIVE_AUTH_MODE": "compat"}, clear=False):
+            self.assertTrue(is_source_authorized(None))
 
 
 if __name__ == "__main__":

@@ -61,6 +61,22 @@ def delete_event_files(event_id: str, filenames: list[str], cache: dict[str, str
     return removed
 
 
+def verify_deleted_local_data(filenames: list[str], document_ids: list[str], cache: dict[str, str]) -> None:
+    """Fail if any source, derived file, or cache entry remains after deletion."""
+    remaining_paths = [
+        path
+        for directory, names in ((ARCHIVE_DIR, filenames), (SOURCE_DIR, document_ids), (SEARCHABLE_DIR, document_ids))
+        for name in names
+        for path in ([directory / name] if directory == ARCHIVE_DIR else directory.glob(f"{name}.*"))
+        if path.exists()
+    ]
+    remaining_cache = [doc_id for doc_id in document_ids if doc_id in cache]
+    if remaining_paths or remaining_cache:
+        raise RuntimeError(
+            f"Deletion verification failed: paths={len(remaining_paths)} cache_entries={len(remaining_cache)}"
+        )
+
+
 def delete_event(event_id: str, *, dry_run: bool = False, base_url: str = QDRANT_URL, collection: str = QDRANT_COLLECTION):
     """Delete a manifest event and all locally derivable representations."""
     manifests = load_manifests(MANIFEST_PATH)
@@ -79,6 +95,7 @@ def delete_event(event_id: str, *, dry_run: bool = False, base_url: str = QDRANT
     delete_qdrant_event(event_id, base_url=base_url, collection=collection)
     delete_event_files(event_id, filenames, cache)
     save_ingest_cache(cache)
+    verify_deleted_local_data(filenames, document_ids, cache)
     event_facts = load_event_facts()
     if event_id in event_facts:
         del event_facts[event_id]

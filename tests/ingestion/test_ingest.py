@@ -170,6 +170,22 @@ class IngestPdfEfficiencyTest(unittest.TestCase):
         with patch.dict("os.environ", {"QDRANT_API_KEY": "test-key"}, clear=False):
             self.assertEqual(ingest.qdrant_request_headers(), {"api-key": "test-key"})
 
+    def test_sensitive_mode_omits_subject_reference_from_payload(self):
+        class Manifest:
+            event_id = "event-1"
+            event_type = "general_document"
+            subject_ref = "person-1"
+
+        with patch.dict("os.environ", {"ARCHIVE_SECURITY_MODE": "sensitive"}, clear=False):
+            payload = ingest._event_payload_metadata(Manifest(), None)
+
+        self.assertEqual(payload, {"event_id": "event-1", "event_type": "general_document"})
+
+        with patch.dict("os.environ", {"ARCHIVE_SECURITY_MODE": ""}, clear=False):
+            payload = ingest._event_payload_metadata(Manifest(), None)
+
+        self.assertEqual(payload["subject_ref"], "person-1")
+
 
 if __name__ == "__main__":
     unittest.main()

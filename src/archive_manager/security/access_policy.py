@@ -3,10 +3,17 @@
 import os
 from typing import Any
 
+from archive_manager.lifecycle.retention import is_expired
+
 
 def current_user() -> str:
     """Return the configured local identity used for event access checks."""
     return os.environ.get("ARCHIVE_AUDIT_USER", "local-user")
+
+
+def strict_mode() -> bool:
+    """Return whether archive access must fail closed for unclassified sources."""
+    return os.environ.get("ARCHIVE_AUTH_MODE", "compat").lower() in {"strict", "enforced"}
 
 
 def is_authorized(manifest: Any, user: str | None = None) -> bool:
@@ -15,12 +22,21 @@ def is_authorized(manifest: Any, user: str | None = None) -> bool:
     Compatibility mode keeps existing unclassified records available. Strict mode
     requires an explicit ``allowed_users`` list in the manifest metadata.
     """
-    if os.environ.get("ARCHIVE_AUTH_MODE", "compat").lower() not in {"strict", "enforced"}:
+    if not strict_mode():
         return True
+    if manifest is None or not hasattr(manifest, "metadata"):
+        return False
     allowed_users = manifest.metadata.get("allowed_users", [])
     if not isinstance(allowed_users, list):
         return False
     return (user or current_user()) in {str(value) for value in allowed_users}
+
+
+def is_source_authorized(manifest: Any, user: str | None = None) -> bool:
+    """Apply authorization to a source, denying unmanifested sources in strict mode."""
+    if manifest is not None and is_expired(manifest):
+        return False
+    return True if manifest is None and not strict_mode() else is_authorized(manifest, user)
 
 
 def authorized_event_ids(manifests: dict[str, Any], user: str | None = None) -> set[str]:
@@ -28,5 +44,5 @@ def authorized_event_ids(manifests: dict[str, Any], user: str | None = None) -> 
     return {
         event_id
         for event_id, manifest in manifests.items()
-        if is_authorized(manifest, user)
+        if is_authorized(manifest, user) and not is_expired(manifest)
     }

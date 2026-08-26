@@ -8,6 +8,10 @@ from typing import Literal
 QueryIntent = Literal[
     "source_inventory",
     "service_date_inventory",
+    "document_date_inventory",
+    "quiz_question_inventory",
+    "quiz_topic_source",
+    "source_by_doc_id",
     "service_advisor_inventory",
     "repair_cause_inventory",
     "label_values_inventory",
@@ -84,6 +88,56 @@ def _wants_grand_total(normalized: str) -> bool:
     )
 
 
+RouteName = Literal[
+    "deterministic_utility",
+    "constrained_exact_query",
+    "multi_document_summary",
+    "broad_scope",
+    "rag",
+]
+
+
+def route_query(question: str) -> RouteName:
+    """Classify a question using a small routing policy for a RAG-first system.
+
+    This is the migration-friendly abstraction: broad and deterministic requests stay
+    in the closed-world path, while narrative questions fall through to retrieval and
+    synthesis. The legacy planner still exists for compatibility with older tests and
+    deterministic intents.
+    """
+    normalized = _normalized(question)
+    if normalized in {
+        "tell me about the archive",
+        "what does the archive say",
+        "summarize the archive",
+        "summarize everything",
+        "summarize all documents",
+        "what is in the archive",
+    }:
+        return "broad_scope"
+
+    if re.search(r"\b(file|files|document|documents)\b", normalized) and re.search(
+        r"\b(name|names|list|listing|processed|indexed)\b", normalized
+    ):
+        return "deterministic_utility"
+
+    if re.search(r"\b(service\s+date|service dates?|saved in the archive|what date|when)\b", normalized):
+        return "deterministic_utility"
+
+    if re.search(r"\b(total charges?|total cost|amount due|balance due)\b", normalized):
+        return "constrained_exact_query"
+
+    if re.search(r"\b(each|every|all)\b", normalized) and re.search(
+        r"\b(summarize|summary|service records?|documents?|files?)\b", normalized
+    ):
+        return "multi_document_summary"
+
+    if re.search(r"\b(not\s+performed|declined|recommended|service advisor|repair cause|labels? and their values)\b", normalized):
+        return "deterministic_utility"
+
+    return "rag"
+
+
 def plan_query(question: str) -> QueryPlan:
     """Classify a question once, prioritizing precise deterministic intents."""
     normalized = _normalized(question)
@@ -122,10 +176,23 @@ def plan_query(question: str) -> QueryPlan:
             group_by="event",
             requested_fields=tuple(re.findall(r"\b(?:promised|ready|invoice|payment|delivery|rate|po|date)\b", normalized)),
         )
+    if re.search(r"\b(?:what|which|give|find|identify)\b", normalized) and re.search(r"\b(?:file|filename|document)\b", normalized) and re.search(r"\bdoc\s+id\s+[a-f0-9]{16,}\b", normalized):
+        return QueryPlan("source_by_doc_id", False, scope="matching_sources", requested_fields=("source_filename",))
     if re.search(r"\b(file|files|document|documents)\b", normalized) and re.search(
         r"\b(name|names|list|listing|processed|indexed)\b", normalized
     ):
         return QueryPlan("source_inventory", False, scope="matching_sources", requested_fields=("source_filename",))
+    if re.search(r"\b(list|show|give|what are|identify)\b", normalized) and re.search(
+        r"\bdates?\b", normalized
+    ) and re.search(r"\b(pharmtech|quiz(?:zes|zes)?|invoice|document|file|record)\b", normalized):
+        return QueryPlan("document_date_inventory", False, scope="matching_sources", requested_fields=("source_filename", "date"))
+    if re.search(r"\b(?:list|show|give|extract|get|return)\b", normalized) and re.search(
+        r"\b(?:first|initial|last)\s+\d+\s+questions?\b", normalized
+    ) and re.search(r"\b(?:quiz(?:zes|zes)?|pharmtech)\b", normalized):
+        requested_fields = ("last_question",) if re.search(r"\blast\s+\d+\s+questions?\b", normalized) else ("question",)
+        return QueryPlan("quiz_question_inventory", False, scope="matching_sources", requested_fields=requested_fields)
+    if re.search(r"\bwhich\s+quiz\b", normalized) and re.search(r"\bquestion\b", normalized) and re.search(r"\bon\b", normalized):
+        return QueryPlan("quiz_topic_source", False, scope="matching_sources", requested_fields=("source_filename", "question"))
     if has_date and re.search(r"\b(total charges?|total cost|amount due|balance due)\b", normalized):
         return QueryPlan("total_charges", False, date_match.group(0))
     total_language = r"\b(total\s+(?:charges?|costs?)|charges?|costs?|amounts?\s+due|balances?\s+due)\b"
@@ -143,6 +210,16 @@ def plan_query(question: str) -> QueryPlan:
     if re.search(r"\b(each|every|all)\b", normalized) and re.search(
         r"\b(summarize|summary|service records?|documents?|files?)\b", normalized
     ):
+        if _output_format_from_question(normalized) != "text" and re.search(r"\b(car|vehicle|service|repair)\b", normalized):
+            return QueryPlan(
+                "performed_services_inventory",
+                False,
+                include_total_cost=bool(re.search(r"\b(total|charges?|cost)\b", normalized)),
+                include_grand_total=_wants_grand_total(normalized),
+                output_format=_output_format_from_question(normalized),
+                scope="all_events",
+                group_by="service_date",
+            )
         return QueryPlan("multi_event_summary", True, scope="all_events", group_by="event")
     if re.search(total_language, normalized) and re.search(
         r"\b(per|by|from\s+oldest|oldest|recent|chronological|events?|service\s+date)\b",
@@ -177,5 +254,16 @@ def plan_query(question: str) -> QueryPlan:
         "summarize all documents",
         "what is in the archive",
     }:
+        return QueryPlan("broad_scope", False)
+    # Compatibility fallback: keep legacy deterministic intents working while the
+    # compact routing policy above is available as the preferred abstraction.
+    routed = route_query(question)
+    if routed == "deterministic_utility":
+        return QueryPlan("source_inventory", False, scope="matching_sources", requested_fields=("source_filename",))
+    if routed == "constrained_exact_query":
+        return QueryPlan("total_charges_inventory", False, output_format=_output_format_from_question(normalized), include_grand_total=_wants_grand_total(normalized))
+    if routed == "multi_document_summary":
+        return QueryPlan("multi_event_summary", True, scope="all_events", group_by="event")
+    if routed == "broad_scope":
         return QueryPlan("broad_scope", False)
     return QueryPlan("free_text", True)

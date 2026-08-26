@@ -62,6 +62,35 @@ def _result_elements(result) -> list[dict]:
     return elements
 
 
+def _quality_report(pages: list[dict]) -> dict:
+    """Summarize OCR coverage and confidence without assuming a document domain."""
+    page_reports = []
+    all_confidences = []
+    for page in pages:
+        elements = page.get("elements", [])
+        confidences = [
+            element["confidence"]
+            for element in elements
+            if element.get("confidence") is not None
+        ]
+        all_confidences.extend(confidences)
+        page_reports.append({
+            "page": page.get("page"),
+            "text_elements": len(elements),
+            "text_characters": sum(len(element.get("text", "")) for element in elements),
+            "mean_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
+            "low_confidence_elements": sum(confidence < 0.75 for confidence in confidences),
+            "empty": not bool(elements),
+        })
+    return {
+        "page_count": len(pages),
+        "empty_pages": sum(report["empty"] for report in page_reports),
+        "mean_confidence": round(sum(all_confidences) / len(all_confidences), 4) if all_confidences else None,
+        "low_confidence_elements": sum(report["low_confidence_elements"] for report in page_reports),
+        "pages": page_reports,
+    }
+
+
 _OCR_LOCK = threading.Lock()
 _OCR_INSTANCE = None
 
@@ -124,7 +153,14 @@ def run_ocr_job(input_pdf: Path, output_text: Path, output_json: Path | None, re
     if output_json:
         output_json.parent.mkdir(parents=True, exist_ok=True)
         output_json.write_text(
-            json.dumps({"engine": "paddleocr", "pages": structured_pages}, indent=2),
+            json.dumps(
+                {
+                    "engine": "paddleocr",
+                    "pages": structured_pages,
+                    "quality": _quality_report(structured_pages),
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
 
