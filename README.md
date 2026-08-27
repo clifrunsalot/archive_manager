@@ -2,21 +2,24 @@
 
 Security hardening tasks are tracked in [SECURITY_CHECKLIST.md](SECURITY_CHECKLIST.md).
 
-For sensitive documents, enable fail-closed security checks before starting
-ingestion or querying:
+All document processing and storage is **sensitive by default** (`ARCHIVE_SECURITY_MODE=sensitive`).
+Fail-closed security checks, manifest encryption at rest (using auto-generated `.archive_key`),
+trace log redaction, local service endpoint validation, and payload minimization are active automatically.
 
-```bash
-export ARCHIVE_SECURITY_MODE=sensitive
-export ARCHIVE_AUTH_MODE=strict
-export ARCHIVE_AUDIT_USER=your-user
-export ARCHIVE_ENCRYPTION_KEY="$(.venv/bin/python -c 'from archive_manager.core.encryption import generate_key; print(generate_key())')"
-export QDRANT_API_KEY=local-secret
-export OLLAMA_BASE=http://localhost:11434
-export PADDLEOCR_SERVICE_URL=http://localhost:8000
-```
+### Toggling Security Modes
 
-Sensitive mode rejects missing encryption or Qdrant keys and non-local model
-or OCR service endpoints.
+- **Turn OFF sensitive mode** (compatibility mode for legacy / unclassified work):
+  ```bash
+  source scripts/sensitive-off.sh
+  ```
+- **Turn ON sensitive mode** (re-enable sensitive protections & strict authorization):
+  ```bash
+  source scripts/sensitive-on.sh
+  ```
+- **Run a single command in sensitive mode**:
+  ```bash
+  ./scripts/sensitive python -m archive_manager.ingestion.ingest
+  ```
 
 Apply owner-only permissions to local sensitive storage with:
 

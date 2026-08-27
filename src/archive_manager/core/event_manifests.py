@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from archive_manager.core.encryption import decrypt_bytes, encrypt_bytes
-from archive_manager.core.event_model import EventManifest
+from archive_manager.core.event_model import EventManifest, PageMetadata
 
 
 def load_manifests(path: Path) -> dict[str, EventManifest]:

@@ -14,7 +14,7 @@ class EncryptionTest(unittest.TestCase):
             self.assertEqual(decrypt_bytes(encrypted), b"sensitive metadata")
 
     def test_plaintext_compatibility_without_key(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"ARCHIVE_SECURITY_MODE": "compat"}, clear=True):
             self.assertEqual(encrypt_bytes(b"legacy"), b"legacy")
             self.assertEqual(decrypt_bytes(b"legacy"), b"legacy")
 

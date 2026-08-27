@@ -338,13 +338,12 @@ export QDRANT_API_KEY=local-secret
 
 ### Manifest Encryption
 
-When `ARCHIVE_ENCRYPTION_KEY` is configured, manifests are encrypted with Fernet authenticated encryption. Existing plaintext manifests remain readable until rewritten. Encrypted manifests fail closed when the key is absent or invalid.
+Sensitive mode (`ARCHIVE_SECURITY_MODE=sensitive`) is active by default. Event manifests are encrypted with Fernet authenticated encryption using `ARCHIVE_ENCRYPTION_KEY` or an auto-generated persistent key stored in `.archive_key` (chmod `600`, git-ignored). Existing plaintext manifests remain readable until rewritten. Encrypted manifests fail closed when the key is absent or invalid.
 
 ```bash
+# Manual key override (optional; auto-generated .archive_key is used by default)
 export ARCHIVE_ENCRYPTION_KEY=$(./.venv/bin/python -c 'from archive_manager.core.encryption import generate_key; print(generate_key())')
 ```
-
-The key must be stored outside the repository. Losing the key makes encrypted metadata unrecoverable.
 
 ### Audit Logging
 

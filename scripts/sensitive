@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+KEY_FILE="$PROJECT_ROOT/.archive_key"
+
+# Automatically load or generate a persistent encryption key
+if [[ -z "${ARCHIVE_ENCRYPTION_KEY:-}" ]]; then
+    if [[ -f "$KEY_FILE" ]]; then
+        ARCHIVE_ENCRYPTION_KEY="$(cat "$KEY_FILE")"
+    else
+        printf '🔒 Generating new persistent encryption key in .archive_key...\n' >&2
+        ARCHIVE_ENCRYPTION_KEY="$("$PROJECT_ROOT/.venv/bin/python" -c 'from archive_manager.core.encryption import generate_key; print(generate_key())')"
+        echo "$ARCHIVE_ENCRYPTION_KEY" > "$KEY_FILE"
+        chmod 600 "$KEY_FILE"
+    fi
+fi
+
+# Export sensitive environment variables for subshell execution
+export ARCHIVE_SECURITY_MODE=sensitive
+export ARCHIVE_AUTH_MODE=strict
+export ARCHIVE_AUDIT_USER="${ARCHIVE_AUDIT_USER:-$(whoami)}"
+export ARCHIVE_ENCRYPTION_KEY="$ARCHIVE_ENCRYPTION_KEY"
+export QDRANT_API_KEY="${QDRANT_API_KEY:-local-secret}"
+export OLLAMA_BASE="${OLLAMA_BASE:-http://localhost:11434}"
+export PADDLEOCR_SERVICE_URL="${PADDLEOCR_SERVICE_URL:-http://localhost:8000}"
+export ARCHIVE_TRACE_CONTENT="${ARCHIVE_TRACE_CONTENT:-0}"
+
+# Ensure PATH includes .venv/bin if present
+if [[ -d "$PROJECT_ROOT/.venv/bin" ]]; then
+    export PATH="$PROJECT_ROOT/.venv/bin:$PATH"
+fi
+
+# Execute command or launch interactive sensitive subshell
+if [[ $# -eq 0 ]]; then
+    printf '🔒 Entered sensitive subshell (%s). Type "exit" or Ctrl+D to return to standard shell.\n' "$ARCHIVE_AUDIT_USER"
+    exec "${SHELL:-/bin/bash}"
+else
+    exec "$@"
+fi

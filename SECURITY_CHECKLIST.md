@@ -12,8 +12,8 @@ Use this checklist before ingesting personal or sensitive documentation.
   - Enable with: `ARCHIVE_AUTH_MODE=strict`
 - [x] Require encryption, Qdrant authentication, and local service URLs in sensitive mode.
   - Validation: `tests.security.test_security_config`
-  - Enable with: `ARCHIVE_SECURITY_MODE=sensitive`
-  - Required: `ARCHIVE_ENCRYPTION_KEY`, `QDRANT_API_KEY`
+  - Active by default (`ARCHIVE_SECURITY_MODE=sensitive`); disable with `source scripts/sensitive-off.sh`
+  - Auto-generated key: `.archive_key` (or `ARCHIVE_ENCRYPTION_KEY`), `QDRANT_API_KEY` default in `settings.env`
 
 ## Remaining
 

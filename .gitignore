@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 src/*.egg-info/
+.archive_key
 
 # OS
 .DS_Store

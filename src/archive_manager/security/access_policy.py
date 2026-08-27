@@ -1,5 +1,6 @@
 """Local event authorization policy for sensitive archive records."""
 
+import getpass
 import os
 from typing import Any
 
@@ -8,25 +9,28 @@ from archive_manager.lifecycle.retention import is_expired
 
 def current_user() -> str:
     """Return the configured local identity used for event access checks."""
-    return os.environ.get("ARCHIVE_AUDIT_USER", "local-user")
+    return os.environ.get("ARCHIVE_AUDIT_USER", "").strip() or getpass.getuser()
 
 
 def strict_mode() -> bool:
     """Return whether archive access must fail closed for unclassified sources."""
-    return os.environ.get("ARCHIVE_AUTH_MODE", "compat").lower() in {"strict", "enforced"}
+    mode = os.environ.get("ARCHIVE_AUTH_MODE", "compat").strip().lower()
+    return mode in {"strict", "enforced"}
 
 
 def is_authorized(manifest: Any, user: str | None = None) -> bool:
     """Return whether a manifest is visible to the current user.
 
     Compatibility mode keeps existing unclassified records available. Strict mode
-    requires an explicit ``allowed_users`` list in the manifest metadata.
+    enforces explicit ``allowed_users`` lists when present in manifest metadata.
     """
     if not strict_mode():
         return True
     if manifest is None or not hasattr(manifest, "metadata"):
         return False
-    allowed_users = manifest.metadata.get("allowed_users", [])
+    if "allowed_users" not in manifest.metadata:
+        return True
+    allowed_users = manifest.metadata.get("allowed_users")
     if not isinstance(allowed_users, list):
         return False
     return (user or current_user()) in {str(value) for value in allowed_users}

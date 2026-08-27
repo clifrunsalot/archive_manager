@@ -10,11 +10,13 @@ from archive_manager.core.encryption import _key
 
 
 SENSITIVE_MODES = {"strict", "enforced", "sensitive"}
+DISABLED_MODES = {"compat", "off", "false", "0", "disabled", "none", "unprotected"}
 
 
 def sensitive_mode() -> bool:
-    """Return whether sensitive-data protections are required."""
-    return os.environ.get("ARCHIVE_SECURITY_MODE", "").lower() in SENSITIVE_MODES
+    """Return whether sensitive-data protections are required (enabled by default)."""
+    mode = os.environ.get("ARCHIVE_SECURITY_MODE", "sensitive").strip().lower()
+    return mode not in DISABLED_MODES
 
 
 def _is_local_url(value: str) -> bool:

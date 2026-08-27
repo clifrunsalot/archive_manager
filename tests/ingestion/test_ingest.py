@@ -181,7 +181,7 @@ class IngestPdfEfficiencyTest(unittest.TestCase):
 
         self.assertEqual(payload, {"event_id": "event-1", "event_type": "general_document"})
 
-        with patch.dict("os.environ", {"ARCHIVE_SECURITY_MODE": ""}, clear=False):
+        with patch.dict("os.environ", {"ARCHIVE_SECURITY_MODE": "compat"}, clear=False):
             payload = ingest._event_payload_metadata(Manifest(), None)
 
         self.assertEqual(payload["subject_ref"], "person-1")
