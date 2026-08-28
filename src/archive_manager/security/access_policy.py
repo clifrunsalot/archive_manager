@@ -2,14 +2,29 @@
 
 import getpass
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from archive_manager.lifecycle.retention import is_expired
 
 
+_request_user: ContextVar[str | None] = ContextVar("archive_request_user", default=None)
+
+
 def current_user() -> str:
     """Return the configured local identity used for event access checks."""
-    return os.environ.get("ARCHIVE_AUDIT_USER", "").strip() or getpass.getuser()
+    return _request_user.get() or os.environ.get("ARCHIVE_AUDIT_USER", "").strip() or getpass.getuser()
+
+
+@contextmanager
+def as_user(user: str):
+    """Apply one authenticated identity to the current request context."""
+    token = _request_user.set(user)
+    try:
+        yield
+    finally:
+        _request_user.reset(token)
 
 
 def strict_mode() -> bool:

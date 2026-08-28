@@ -21,7 +21,20 @@ To ensure code reuse and maintainability, the application logic will be decouple
 graph TD
     subgraph Clients
         CLI[CLI Tools / Console Commands]
-        WEB[Web UI Streamlit / React]
+        WEB[React Browser UI]
+    end
+
+    subgraph "LAN Edge"
+        PROXY[Caddy or Nginx\nTLS and reverse proxy]
+        IDP[OIDC Identity Provider]
+    end
+
+    subgraph "Application Layer"
+        API[FastAPI API\nAuthentication and request authorization]
+        WEB --> PROXY
+        PROXY --> API
+        PROXY -. login .-> IDP
+        IDP -. identity .-> PROXY
     end
 
     subgraph "Shared Service Layer (src/archive_manager/services/)"
@@ -43,10 +56,10 @@ graph TD
     CLI --> CatalogSvc
     CLI --> SecuritySvc
 
-    WEB --> QuerySvc
-    WEB --> IngestSvc
-    WEB --> CatalogSvc
-    WEB --> SecuritySvc
+    API --> QuerySvc
+    API --> IngestSvc
+    API --> CatalogSvc
+    API --> SecuritySvc
 
     QuerySvc --> Qdrant
     QuerySvc --> Ollama
@@ -54,6 +67,89 @@ graph TD
     IngestSvc --> Qdrant
     CatalogSvc --> Manifests
     SecuritySvc --> Manifests
+```
+
+### Component Diagram
+
+The browser is served through the LAN reverse proxy. Only the proxy is
+reachable by other devices on the network; FastAPI and the archive backends
+remain on a private host or Docker network. The proxy authenticates users with
+OIDC and forwards the verified identity to FastAPI, which applies strict
+event-level authorization before calling the shared services.
+
+```mermaid
+flowchart LR
+    Browser[User browser\nReact application]
+    Proxy[LAN reverse proxy\nCaddy or Nginx\nHTTPS, session, CSRF, rate limits]
+    Identity[OIDC provider\nAuthentik, Keycloak, or equivalent]
+    API[FastAPI\nREST API and authenticated request context]
+    Services[Shared archive services\nQuery, ingestion, catalog, security]
+    Qdrant[(Qdrant\nprivate network)]
+    Ollama[(Ollama\nprivate network)]
+    OCR[(PaddleOCR\nprivate network)]
+    Files[(Encrypted manifests\nand local archive files)]
+
+    Browser -->|HTTPS| Proxy
+    Proxy <-->|OIDC login and callback| Identity
+    Proxy -->|verified user identity| API
+    API --> Services
+    Services --> Qdrant
+    Services --> Ollama
+    Services --> OCR
+    Services --> Files
+
+    classDef edge fill:#e8f1f8,stroke:#2f5d7c,color:#14212b
+    classDef app fill:#eef5e8,stroke:#4c743c,color:#1d2b18
+    classDef data fill:#f8efe2,stroke:#9a6b2f,color:#302111
+    class Browser,Proxy,Identity edge
+    class API,Services app
+    class Qdrant,Ollama,OCR,Files data
+```
+
+### Authenticated Query Sequence
+
+This sequence shows the normal query path. The same identity propagation and
+authorization boundary applies to ingestion, catalog operations, and admin
+actions, with destructive actions additionally requiring an explicit dry-run
+confirmation.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Browser as React Browser
+    participant Proxy as LAN Reverse Proxy
+    participant IdP as OIDC Provider
+    participant API as FastAPI API
+    participant Auth as Authorization Policy
+    participant Query as Query Service
+    participant Store as Qdrant and Manifests
+    participant Model as Ollama
+
+    User->>Browser: Open archive UI
+    Browser->>Proxy: Request application
+    alt No valid session
+        Proxy->>IdP: Redirect for OIDC login
+        IdP-->>Proxy: Authenticated identity and claims
+        Proxy-->>Browser: Secure session cookie
+    end
+    Browser->>Proxy: Submit question and filters
+    Proxy->>API: Forward request with verified user identity
+    API->>Auth: Check strict event authorization
+    Auth->>Store: Load manifests and allowed_users
+    Store-->>Auth: Authorized event scope
+    alt User is not authorized
+        Auth-->>API: Deny request
+        API-->>Browser: 403 response
+    else User is authorized
+        API->>Query: Answer question within authorized scope
+        Query->>Store: Retrieve scoped evidence
+        Store-->>Query: Evidence and event metadata
+        Query->>Model: Synthesize answer from evidence
+        Model-->>Query: Grounded response
+        Query-->>API: Answer, provenance, and audit details
+        API-->>Browser: JSON response
+        Browser-->>User: Render answer and evidence
+    end
 ```
 
 ---

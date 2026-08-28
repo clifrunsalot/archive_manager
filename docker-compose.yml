@@ -53,7 +53,63 @@ services:
     command: ["python", "/work/paddleocr_runner.py", "--serve", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
 
+  archive-api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    container_name: archive-api
+    environment:
+      ARCHIVE_AUTH_MODE: strict
+      ARCHIVE_API_HOST: 0.0.0.0
+      ARCHIVE_API_PORT: 8080
+      ARCHIVE_SECURITY_MODE: ${ARCHIVE_SECURITY_MODE:-sensitive}
+      ARCHIVE_ENCRYPTION_KEY: ${ARCHIVE_ENCRYPTION_KEY:?set ARCHIVE_ENCRYPTION_KEY}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY}
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_BASE: http://ollama:11434
+      PADDLEOCR_SERVICE_URL: http://paddleocr:8000
+    depends_on:
+      - qdrant
+      - ollama
+      - paddleocr
+    expose:
+      - "8080"
+    volumes:
+      - ./ARCHIVE:/app/ARCHIVE
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.12.0
+    container_name: archive-oauth2-proxy
+    env_file:
+      - path: ./deploy/oauth2-proxy.env
+        required: false
+    expose:
+      - "4180"
+    depends_on:
+      - archive-api
+    restart: unless-stopped
+
+  archive-web:
+    image: caddy:2.10-alpine
+    container_name: archive-web
+    ports:
+      - "127.0.0.1:8443:443"
+    volumes:
+      - ./deploy/Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - ./web/dist:/srv/archive-ui:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - archive-api
+      - oauth2-proxy
+    restart: unless-stopped
+
 volumes:
   qdrant_data:
   ollama_data:
   paddleocr_models:
+  caddy_data:
+  caddy_config:

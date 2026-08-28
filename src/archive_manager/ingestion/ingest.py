@@ -590,6 +590,8 @@ def qdrant_list_sources(limit: int = 10000):
         if offset is not None:
             payload["offset"] = offset
         r = REQUEST_SESSION.post(url, json=payload, timeout=30, headers=qdrant_request_headers())
+        if r.status_code == 404:
+            return []
         r.raise_for_status()
         result = r.json().get("result", {})
         for point in result.get("points", []):

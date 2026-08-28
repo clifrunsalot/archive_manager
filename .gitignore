@@ -21,3 +21,8 @@ test_artifacts/
 
 # Personal documents accidentally placed at the repo root
 In-Person_Identification_Form.pdf
+
+# Frontend dependencies and build output
+web/node_modules/
+web/dist/
+deploy/oauth2-proxy.env

@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import patch
 
 from archive_manager.retrieval.query_planner import plan_query, route_query
+from archive_manager.retrieval import query
 
 
 class QueryPlannerTest(unittest.TestCase):
@@ -84,6 +86,17 @@ class QueryPlannerTest(unittest.TestCase):
     def test_inventory_and_summary_intents(self):
         self.assertEqual(plan_query("list processed files").intent, "source_inventory")
         self.assertEqual(
+            plan_query("list the filenames of the pharmtech quizes in the archive").intent,
+            "source_inventory",
+        )
+        self.assertNotEqual(
+            plan_query(
+                "Examine each quiz for the number of questions. Then generate a table "
+                "that shows the filename, date, and number of questions per quiz."
+            ).intent,
+            "source_inventory",
+        )
+        self.assertEqual(
             plan_query("Who was the service advisor on each car service date?").intent,
             "service_advisor_inventory",
         )
@@ -123,6 +136,21 @@ class QueryPlannerTest(unittest.TestCase):
         self.assertEqual(route_query("summarize every service record"), "multi_document_summary")
         self.assertEqual(route_query("What does the archive say about brakes?"), "rag")
         self.assertEqual(route_query("What is in the archive?"), "broad_scope")
+
+    def test_pharmtech_filename_inventory_matches_underscore_names(self):
+        sources = [
+            "pharmtech_quiz_Lesson_1_2025-09-11.pdf",
+            "pharmtech_quiz_Lesson_8_2025-09-23.pdf",
+            "pharmtech_quiz_Lesson_11_2025-09-27.pdf",
+            "repair-2025-11-25.png.pdf",
+        ]
+        with patch.object(query, "_authorized_sources", return_value=sources):
+            with patch.object(query, "load_indexed_sources", return_value=sources):
+                result = query._deterministic_handlers().get("source_inventory")(
+                    "list the filenames of the pharmtech quizes in the archive", None, "test"
+                )
+        self.assertEqual(result.count("pharmtech_quiz_"), 3)
+        self.assertNotIn("repair-2025", result)
 
 
 if __name__ == "__main__":

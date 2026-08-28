@@ -166,6 +166,17 @@ class IngestPdfEfficiencyTest(unittest.TestCase):
         point_calls = [call for call in calls if "/points?wait=true" in call[1]]
         self.assertEqual(len(point_calls), 1)
 
+    def test_qdrant_list_sources_returns_empty_when_collection_is_missing(self):
+        class FakeResponse:
+            status_code = 404
+
+            def raise_for_status(self):
+                raise AssertionError("404 should be handled as an empty index")
+
+        with patch.object(ingest.REQUEST_SESSION, "post", return_value=FakeResponse()), \
+             patch.object(ingest, "ensure_qdrant_collection"):
+            self.assertEqual(ingest.qdrant_list_sources(), [])
+
     def test_qdrant_api_key_is_sent_as_header(self):
         with patch.dict("os.environ", {"QDRANT_API_KEY": "test-key"}, clear=False):
             self.assertEqual(ingest.qdrant_request_headers(), {"api-key": "test-key"})

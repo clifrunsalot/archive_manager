@@ -116,8 +116,10 @@ def route_query(question: str) -> RouteName:
     }:
         return "broad_scope"
 
-    if re.search(r"\b(file|files|document|documents)\b", normalized) and re.search(
-        r"\b(name|names|list|listing|processed|indexed)\b", normalized
+    if re.search(r"\b(?:each|every|all)\b", normalized) and re.search(r"\bquiz(?:zes|zes)?\b", normalized) and re.search(r"\b(?:number|count|how many)\s+of\s+(?:the\s+)?questions?\b|\bquestions?\s+(?:per|in|for)\s+(?:each\s+)?quiz\b", normalized):
+        return "deterministic_utility"
+    if not re.search(r"\b(?:number|count|how many)\s+of\s+(?:the\s+)?questions?\b|\bquestions?\s+(?:per|in|for)\s+(?:each\s+)?quiz\b", normalized) and re.search(r"\b(file|files|filename|filenames|document|documents)\b", normalized) and re.search(
+        r"\b(name|names|filename|filenames|list|listing|processed|indexed)\b", normalized
     ):
         return "deterministic_utility"
 
@@ -178,8 +180,10 @@ def plan_query(question: str) -> QueryPlan:
         )
     if re.search(r"\b(?:what|which|give|find|identify)\b", normalized) and re.search(r"\b(?:file|filename|document)\b", normalized) and re.search(r"\bdoc\s+id\s+[a-f0-9]{16,}\b", normalized):
         return QueryPlan("source_by_doc_id", False, scope="matching_sources", requested_fields=("source_filename",))
-    if re.search(r"\b(file|files|document|documents)\b", normalized) and re.search(
-        r"\b(name|names|list|listing|processed|indexed)\b", normalized
+    if re.search(r"\b(?:each|every|all)\b", normalized) and re.search(r"\bquiz(?:zes|zes)?\b", normalized) and re.search(r"\b(?:number|count|how many)\s+of\s+(?:the\s+)?questions?\b|\bquestions?\s+(?:per|in|for)\s+(?:each\s+)?quiz\b", normalized):
+        return QueryPlan("quiz_question_inventory", False, output_format="markdown_table", scope="matching_sources", requested_fields=("question_count",))
+    if not re.search(r"\b(?:number|count|how many)\s+of\s+(?:the\s+)?questions?\b|\bquestions?\s+(?:per|in|for)\s+(?:each\s+)?quiz\b", normalized) and re.search(r"\b(file|files|document|documents)\b", normalized) and re.search(
+        r"\b(name|names|filename|filenames|list|listing|processed|indexed)\b", normalized
     ):
         return QueryPlan("source_inventory", False, scope="matching_sources", requested_fields=("source_filename",))
     if re.search(r"\b(list|show|give|what are|identify)\b", normalized) and re.search(

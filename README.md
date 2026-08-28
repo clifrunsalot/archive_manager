@@ -36,6 +36,115 @@ confirmation-gated command:
 
 This project ingests documents into a searchable archive and supports semantic retrieval over the stored content. The pipeline watches a directory for new files, normalizes them into a usable PDF form, extracts text, chunks it, embeds the content, and stores both vector embeddings and source metadata in Qdrant.
 
+## UI
+
+The React UI lives under `web/`. It uses mock data by default, and can connect
+to the local FastAPI API when live mode is enabled. Install Node.js 20 or newer,
+then run:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open the local Vite URL shown in the terminal.
+
+The **Activity & Logs** view shows sanitized query audit entries plus the
+authenticated user's ingestion and lifecycle job statuses. It does not expose
+raw OCR text, source documents, credentials, or unfiltered log files.
+
+The Event Catalog also includes an **Artifacts in archive** list backed by the
+processed ingest cache. It is fetched from `/api/v1/artifacts` when the catalog
+opens, so it reflects newly ingested files and becomes empty after an archive
+reset.
+
+For same-machine browser testing against the API, use loopback-only local
+identity mode. It derives the username from the operating-system account and
+does not accept requests from LAN addresses:
+
+```bash
+export ARCHIVE_AUTH_MODE=strict
+export ARCHIVE_LOCAL_ONLY=1
+./.venv/bin/archive-api
+```
+
+Then run the UI in another terminal:
+
+```bash
+cd web
+VITE_API_MODE=live npm run dev
+```
+
+Use this only on the same machine. Disable `ARCHIVE_LOCAL_ONLY` before any LAN
+deployment; LAN login is reserved for the future Authentik/OIDC upgrade in
+[FUTURE_LAN_OIDC_UPGRADE.md](FUTURE_LAN_OIDC_UPGRADE.md).
+
+To review the UI against the local API instead of mock data, start
+`archive-api` on port `8080`, enable strict authorization, and run Vite with:
+
+```bash
+VITE_API_MODE=live npm run dev
+```
+
+Vite proxies `/api` to `http://127.0.0.1:8080`. Direct development requests do
+not provide an authenticated proxy identity, so protected API calls correctly
+return `401` until the reverse-proxy/OIDC deployment is used.
+
+## API middle layer
+
+The FastAPI middle layer is available through the `archive-api` command. The
+shared query, catalog, intake, lifecycle, and security services back both the
+API and UI integrations.
+
+Run it locally after installing the package:
+
+```bash
+export ARCHIVE_AUTH_MODE=strict
+export ARCHIVE_AUDIT_USER=proxy-managed
+./.venv/bin/archive-api
+```
+
+The server listens on `http://127.0.0.1:8080` by default. A trusted reverse
+proxy must supply the `X-Authenticated-User` header after completing OIDC
+authentication. Direct API requests without that header receive `401`, and API
+requests while authorization is not strict receive `503`.
+
+`GET /api/health` is a lightweight liveness check. `GET /api/ready` checks
+Qdrant, Ollama, and PaddleOCR with short timeouts and returns `503` while any
+dependency is unavailable; it does not expose service URLs or credentials.
+
+The Compose deployment scaffold also includes `archive-api`, `oauth2-proxy`,
+and Caddy. To review that topology, build the UI first, copy
+`deploy/oauth2-proxy.env.example` to `deploy/oauth2-proxy.env`, fill in the
+OIDC provider values, and run:
+
+```bash
+cd web && npm run build && cd ..
+docker compose up -d --build archive-api oauth2-proxy archive-web
+```
+
+Caddy serves the UI at `https://127.0.0.1:8443` with an internal certificate.
+The example is intentionally not production-ready until the OIDC values,
+certificate trust, and LAN firewall policy are configured.
+
+For local browser testing, map `archive.home` to the machine running Caddy in
+your hosts file, trust Caddy's internal root certificate on the client device,
+and open `https://archive.home:8443`. The OIDC provider redirect URI must match
+`https://archive.home/oauth2/callback`. For another LAN device, replace the
+hosts entry with the server's LAN address and use a certificate trusted by that
+device.
+
+Before starting the LAN stack, run the secret-safe deployment preflight:
+
+```bash
+./scripts/validate-deployment.sh
+```
+
+It checks for the built UI, strict authorization, required keys, configured
+OIDC values, deployment templates, and valid Compose configuration without
+printing secret values.
+
 It also supports an optional local report-export mode for query results. When enabled, the system saves a clean Markdown report to a local output directory such as `artifact_output`, using only the retrieved evidence that supported the answer. This keeps the feature opt-in and safe for local-only use.
 
 ## Setup and configuration

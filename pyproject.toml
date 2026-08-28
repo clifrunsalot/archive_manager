@@ -7,6 +7,16 @@ name = "archive-manager"
 version = "0.1.0"
 description = "Document archive with semantic search and domain-specific fact extraction."
 requires-python = ">=3.10"
+dependencies = [
+	"fastapi>=0.115,<1",
+	"python-multipart>=0.0.9,<1",
+	"uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+	"httpx2>=0.1",
+]
 
 [project.scripts]
 archive-ingest = "archive_manager.ingestion.ingest:main"
@@ -18,6 +28,7 @@ archive-purge-expired = "archive_manager.admin.purge_expired:main"
 archive-backfill-event-facts = "archive_manager.admin.backfill_event_facts:main"
 archive-reset = "archive_manager.admin.reset_archive:main"
 archive-evaluate-queries = "archive_manager.evaluation.evaluate_queries:main"
+archive-api = "archive_manager.api.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

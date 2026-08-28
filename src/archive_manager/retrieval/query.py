@@ -1206,6 +1206,28 @@ def _format_source_inventory(sources):
     return "Processed files:\n" + "\n".join(f"- {source}" for source in sources)
 
 
+def _quiz_date_from_texts(texts: list[str]) -> str:
+    """Return the first 2025 calendar date found in quiz text."""
+    date_pattern = re.compile(
+        r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+        r"\s+\d{1,2},?\s+2025\b",
+        re.IGNORECASE,
+    )
+    for text in texts:
+        match = date_pattern.search(text)
+        if match:
+            return datetime.strptime(match.group(0).replace(",", ""), "%B %d %Y").date().isoformat()
+    return "unknown"
+
+
+def _filter_source_inventory_family(sources, question: str):
+    """Narrow filename inventory requests to an explicitly named document family."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", question.lower())
+    if re.search(r"\b(pharmtech|quiz|quizzes|quizes)\b", normalized):
+        return [source for source in sources if re.search(r"(?:^|[^a-z0-9])(pharmtech|quiz)(?:[^a-z0-9]|$)", source.lower())]
+    return sources
+
+
 def _document_dates_from_sources(question: str) -> list[str]:
     """Extract ISO dates from filenames matching the named document family."""
     normalized = re.sub(r"[^a-z0-9]+", " ", question.lower())
@@ -1332,6 +1354,7 @@ def _deterministic_handlers() -> QueryHandlerRegistry:
         sources = _authorized_sources(load_indexed_sources())
         if not sources:
             sources = _authorized_sources(qdrant_list_sources())
+        sources = _filter_source_inventory_family(sources, question)
         sources = _filter_sources_by_date(sources, question)
         answer_text = _format_source_inventory(sources)
         record_query_audit(question, outcome="source_inventory")
@@ -1356,6 +1379,28 @@ def _deterministic_handlers() -> QueryHandlerRegistry:
         return answer_text
 
     def quiz_question_inventory(question, plan, run_id):
+        if plan and plan.requested_fields == ("question_count",):
+            cache = load_ingest_cache()
+            sources = _authorized_sources(load_indexed_sources())
+            if not sources:
+                sources = _authorized_sources(qdrant_list_sources())
+            sources = sorted(
+                [source for source in sources if "quiz" in source.casefold() or "pharmtech" in source.casefold()],
+                key=str.casefold,
+            )
+            rows = []
+            for source in sources:
+                values = _extract_inline_label_values(_source_texts(source, cache))
+                count = sum(1 for label in values if re.match(r"Question\s+\d+\s*:", label, re.IGNORECASE))
+                date_match = re.search(r"20\d{2}[-_]\d{2}[-_]\d{2}", source)
+                date = _quiz_date_from_texts(_source_texts(source, cache))
+                rows.append((source, date if date != "unknown" else (date_match.group(0).replace("_", "-") if date_match else "unknown"), count))
+            answer_text = "| filename | date | number of questions |\n| --- | --- | --- |\n" + "\n".join(
+                f"| {source} | {date} | {count} |" for source, date, count in rows
+            ) if rows else "No quiz questions were found in the archive."
+            record_query_audit(question, hit_count=sum(count for _source, _date, count in rows), outcome="quiz_question_inventory")
+            trace_event(run_id, "quiz_question_inventory", "END", status="completed", answer=answer_text, records=rows)
+            return answer_text
         records = _quiz_questions_from_sources(question)
         answer_text = _format_quiz_questions(records)
         record_query_audit(question, hit_count=sum(len(questions) for _source, questions in records), outcome="quiz_question_inventory")

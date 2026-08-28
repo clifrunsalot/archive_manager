@@ -1,0 +1,40 @@
+{
+	# Use a trusted LAN certificate for review. Replace with a real certificate
+	# policy before exposing the service beyond the private network.
+	auto_https disable_redirects
+}
+
+archive.home {
+	tls internal
+	root * /srv/archive-ui
+
+	# Remove any identity supplied by the browser before auth runs. The API is
+	# reachable only through this proxy in the deployed topology.
+	request_header -X-Authenticated-User
+
+	header {
+		-X-Authenticated-User
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com"
+	}
+
+	@auth path /oauth2/*
+	handle @auth {
+		reverse_proxy oauth2-proxy:4180
+	}
+
+	forward_auth oauth2-proxy:4180 {
+		uri /oauth2/auth
+		copy_headers X-Auth-Request-User>X-Authenticated-User
+	}
+
+	@api path /api/*
+	handle @api {
+		reverse_proxy archive-api:8080
+	}
+
+	try_files {path} /index.html
+	file_server
+}
