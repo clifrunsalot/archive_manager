@@ -456,11 +456,18 @@ def ensure_qdrant_collection() -> None:
 
 def qdrant_upsert_points(points):
     """Insert or update one or more vectors into the Qdrant collection."""
+    global _QDRANT_COLLECTION_READY
     ensure_qdrant_collection()
     url = f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points?wait=true"
     r = REQUEST_SESSION.put(
         url, json={"points": points}, timeout=120, headers=qdrant_request_headers()
     )
+    if r.status_code == 404:
+        _QDRANT_COLLECTION_READY = False
+        ensure_qdrant_collection()
+        r = REQUEST_SESSION.put(
+            url, json={"points": points}, timeout=120, headers=qdrant_request_headers()
+        )
     if not r.ok:
         print("Qdrant status:", r.status_code)
         print("Qdrant body:", r.text)

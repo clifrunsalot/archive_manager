@@ -168,8 +168,11 @@ def ollama_chat(model: str, messages, session=None):
         return request_chat(model)
     except requests.HTTPError as exc:
         error_text = exc.response.text if exc.response is not None else ""
-        fallback_model = os.environ.get("FALLBACK_ANSWER_MODEL", "qwen2.5-coder:7b")
-        if "llama-server process has terminated" not in error_text or fallback_model == model:
+        fallback_model = os.environ.get("FALLBACK_ANSWER_MODEL", "gemma3:4b")
+        if (
+            "llama-server process has terminated" not in error_text
+            and "model" not in error_text.lower()
+        ) or fallback_model == model:
             raise
         print(f"[query] answer_model_failed={model}; retrying_with={fallback_model}")
         return request_chat(fallback_model)
@@ -1730,7 +1733,7 @@ def answer(question: str, top_k: int = 10, max_excerpt_chars: int = 1200, verbos
                 "\n---\n",
             )
 
-    qwen_model = os.environ.get("ANSWER_MODEL", "qwen2.5-coder:7b")
+    qwen_model = os.environ.get("ANSWER_MODEL", "gemma3:4b")
 
     if document_summary:
         record_hits = _hits_by_record(hits)

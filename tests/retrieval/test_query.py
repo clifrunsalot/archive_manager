@@ -581,7 +581,36 @@ class QueryFilenameSearchTest(unittest.TestCase):
                 Response(200, {"message": {"content": "fallback answer"}}),
             ],
         ) as post:
-            result = query.ollama_chat("qwen2.5:14b", [{"role": "user", "content": "Question"}])
+            result = query.ollama_chat("primary-model", [{"role": "user", "content": "Question"}])
+
+        self.assertEqual(result, "fallback answer")
+        self.assertEqual(post.call_args_list[1].kwargs["json"]["model"], "qwen2.5-coder:7b")
+
+    def test_ollama_chat_falls_back_when_primary_model_is_unavailable(self):
+        class Response:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+                self.text = payload.get("error", "")
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    error = query.requests.HTTPError(f"HTTP {self.status_code}")
+                    error.response = self
+                    raise error
+
+            def json(self):
+                return self._payload
+
+        with patch.dict("os.environ", {"FALLBACK_ANSWER_MODEL": "qwen2.5-coder:7b"}, clear=False), patch.object(
+            query.REQUEST_SESSION,
+            "post",
+            side_effect=[
+                Response(404, {"error": "model 'missing-model' not found"}),
+                Response(200, {"message": {"content": "fallback answer"}}),
+            ],
+        ) as post:
+            result = query.ollama_chat("missing-model", [{"role": "user", "content": "Question"}])
 
         self.assertEqual(result, "fallback answer")
         self.assertEqual(post.call_args_list[1].kwargs["json"]["model"], "qwen2.5-coder:7b")

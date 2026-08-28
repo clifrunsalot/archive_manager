@@ -166,6 +166,31 @@ class IngestPdfEfficiencyTest(unittest.TestCase):
         point_calls = [call for call in calls if "/points?wait=true" in call[1]]
         self.assertEqual(len(point_calls), 1)
 
+    def test_qdrant_upsert_recovers_when_cached_collection_is_removed(self):
+        calls = []
+
+        class FakeResponse:
+            def __init__(self, status_code=200):
+                self.status_code = status_code
+                self.ok = status_code < 400
+                self.text = ""
+
+            def json(self):
+                return {"result": "ok"}
+
+            def raise_for_status(self):
+                if not self.ok:
+                    raise RuntimeError("HTTP error")
+
+        with patch.object(ingest, "ensure_qdrant_collection", side_effect=lambda: calls.append("ensure")), \
+             patch.object(ingest.REQUEST_SESSION, "put", side_effect=[FakeResponse(404), FakeResponse(200)]):
+            ingest._QDRANT_COLLECTION_READY = True
+            result = ingest.qdrant_upsert_points([{"id": 1, "vector": [0.1], "payload": {}}])
+
+        self.assertEqual(result, {"result": "ok"})
+        self.assertEqual(calls, ["ensure", "ensure"])
+        self.assertFalse(ingest._QDRANT_COLLECTION_READY)
+
     def test_qdrant_list_sources_returns_empty_when_collection_is_missing(self):
         class FakeResponse:
             status_code = 404

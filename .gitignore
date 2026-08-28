@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 src/*.egg-info/
 .archive_key
+settings.env
 
 # OS
 .DS_Store

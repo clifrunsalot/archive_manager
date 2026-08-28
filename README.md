@@ -36,19 +36,76 @@ confirmation-gated command:
 
 This project ingests documents into a searchable archive and supports semantic retrieval over the stored content. The pipeline watches a directory for new files, normalizes them into a usable PDF form, extracts text, chunks it, embeds the content, and stores both vector embeddings and source metadata in Qdrant.
 
-## UI
+## Start Locally
 
-The React UI lives under `web/`. It uses mock data by default, and can connect
-to the local FastAPI API when live mode is enabled. Install Node.js 20 or newer,
-then run:
+Use three terminals. Run every command from the repository unless the command
+changes directory itself. The local UI is available at `http://127.0.0.1:5173/`.
+
+### `settings.env`
+
+Create `settings.env` before starting the tool. It must contain the local
+service settings, including `QDRANT_API_KEY` and `ARCHIVE_ENCRYPTION_KEY`.
+Keep it out of version control and retain the encryption key; changing it makes
+existing encrypted manifests unreadable. The API startup command below loads
+this file, and Docker Compose receives it through `--env-file settings.env`.
+
+### 1. Start local dependencies
+
+Start Docker Desktop, then run:
 
 ```bash
-cd web
-npm install
-npm run dev
+cd /Users/cliftonhudson/archive_manager
+docker compose --env-file settings.env up -d qdrant ollama paddleocr
+docker compose --env-file settings.env ps
 ```
 
-Open the local Vite URL shown in the terminal.
+Wait until Qdrant, Ollama, and PaddleOCR are running. On the first startup,
+download the required Ollama models:
+
+```bash
+docker compose --env-file settings.env up ollama-models
+```
+
+### 2. Start the API
+
+In a second terminal:
+
+```bash
+cd /Users/cliftonhudson/archive_manager
+source .venv/bin/activate
+set -a
+source settings.env
+set +a
+ARCHIVE_AUTH_MODE=strict ARCHIVE_LOCAL_ONLY=1 archive-api
+```
+
+Leave this terminal running. Confirm the API is ready:
+
+```bash
+curl -sS http://127.0.0.1:8080/api/ready
+```
+
+### 3. Start the browser UI
+
+In a third terminal:
+
+```bash
+cd /Users/cliftonhudson/archive_manager/web
+VITE_API_MODE=live npm run dev -- --host 127.0.0.1
+```
+
+Open `http://127.0.0.1:5173/` in a browser.
+
+### Stop Local Services
+
+Stop the API and Vite terminals with `Ctrl+C`, then stop Docker services:
+
+```bash
+cd /Users/cliftonhudson/archive_manager
+docker compose --env-file settings.env down
+```
+
+Do not add `-v`; it removes persisted Qdrant data.
 
 The **Activity & Logs** view shows sanitized query audit entries plus the
 authenticated user's ingestion and lifecycle job statuses. It does not expose
@@ -59,37 +116,10 @@ processed ingest cache. It is fetched from `/api/v1/artifacts` when the catalog
 opens, so it reflects newly ingested files and becomes empty after an archive
 reset.
 
-For same-machine browser testing against the API, use loopback-only local
-identity mode. It derives the username from the operating-system account and
-does not accept requests from LAN addresses:
-
-```bash
-export ARCHIVE_AUTH_MODE=strict
-export ARCHIVE_LOCAL_ONLY=1
-./.venv/bin/archive-api
-```
-
-Then run the UI in another terminal:
-
-```bash
-cd web
-VITE_API_MODE=live npm run dev
-```
-
-Use this only on the same machine. Disable `ARCHIVE_LOCAL_ONLY` before any LAN
-deployment; LAN login is reserved for the future Authentik/OIDC upgrade in
+The local workflow is loopback-only and derives the username from the operating
+system account. Follow [Start Locally](#start-locally); it is the single
+supported browser startup procedure. LAN/OIDC deployment is deferred to
 [FUTURE_LAN_OIDC_UPGRADE.md](FUTURE_LAN_OIDC_UPGRADE.md).
-
-To review the UI against the local API instead of mock data, start
-`archive-api` on port `8080`, enable strict authorization, and run Vite with:
-
-```bash
-VITE_API_MODE=live npm run dev
-```
-
-Vite proxies `/api` to `http://127.0.0.1:8080`. Direct development requests do
-not provide an authenticated proxy identity, so protected API calls correctly
-return `401` until the reverse-proxy/OIDC deployment is used.
 
 ## API middle layer
 
@@ -97,116 +127,23 @@ The FastAPI middle layer is available through the `archive-api` command. The
 shared query, catalog, intake, lifecycle, and security services back both the
 API and UI integrations.
 
-Run it locally after installing the package:
-
-```bash
-export ARCHIVE_AUTH_MODE=strict
-export ARCHIVE_AUDIT_USER=proxy-managed
-./.venv/bin/archive-api
-```
-
-The server listens on `http://127.0.0.1:8080` by default. A trusted reverse
-proxy must supply the `X-Authenticated-User` header after completing OIDC
-authentication. Direct API requests without that header receive `401`, and API
-requests while authorization is not strict receive `503`.
+The server listens on `http://127.0.0.1:8080` by default. Its local startup
+command and required environment are listed in [Start Locally](#start-locally).
 
 `GET /api/health` is a lightweight liveness check. `GET /api/ready` checks
 Qdrant, Ollama, and PaddleOCR with short timeouts and returns `503` while any
 dependency is unavailable; it does not expose service URLs or credentials.
 
-The Compose deployment scaffold also includes `archive-api`, `oauth2-proxy`,
-and Caddy. To review that topology, build the UI first, copy
-`deploy/oauth2-proxy.env.example` to `deploy/oauth2-proxy.env`, fill in the
-OIDC provider values, and run:
-
-```bash
-cd web && npm run build && cd ..
-docker compose up -d --build archive-api oauth2-proxy archive-web
-```
-
-Caddy serves the UI at `https://127.0.0.1:8443` with an internal certificate.
-The example is intentionally not production-ready until the OIDC values,
-certificate trust, and LAN firewall policy are configured.
-
-For local browser testing, map `archive.home` to the machine running Caddy in
-your hosts file, trust Caddy's internal root certificate on the client device,
-and open `https://archive.home:8443`. The OIDC provider redirect URI must match
-`https://archive.home/oauth2/callback`. For another LAN device, replace the
-hosts entry with the server's LAN address and use a certificate trusted by that
-device.
-
-Before starting the LAN stack, run the secret-safe deployment preflight:
-
-```bash
-./scripts/validate-deployment.sh
-```
-
-It checks for the built UI, strict authorization, required keys, configured
-OIDC values, deployment templates, and valid Compose configuration without
-printing secret values.
+The Compose API, OAuth2 Proxy, and Caddy services are deployment scaffolding,
+not part of the local startup path. See
+[FUTURE_LAN_OIDC_UPGRADE.md](FUTURE_LAN_OIDC_UPGRADE.md) before using them.
 
 It also supports an optional local report-export mode for query results. When enabled, the system saves a clean Markdown report to a local output directory such as `artifact_output`, using only the retrieved evidence that supported the answer. This keeps the feature opt-in and safe for local-only use.
 
-## Setup and configuration
+## Configuration
 
-Complete this section before starting the application. Docker Compose starts the required services and builds the local PaddleOCR image.
-
-### 1. Start Docker Desktop
-
-Start Docker Desktop on macOS before running any Qdrant or Ollama containers.
-
-### 2. Start the services and build PaddleOCR
-
-Open Terminal.app and run:
-
-```bash
-cd /Users/cliftonhudson/archive_manager
-docker compose up -d --build
-```
-
-This starts Qdrant and Ollama, builds the local PaddleOCR image, and downloads the required Ollama models. The model download service exits when both downloads finish; the Qdrant, Ollama, and PaddleOCR services remain available.
-
-### 3. Stop all project containers
-
-Use the project teardown script when stopping the services. It also removes the
-`archive-anythingllm` container when present, because that container can keep the
-Compose network in use after `docker compose down`.
-
-```bash
-./scripts/docker-down.sh
-```
-
-Set `ANYTHINGLLM_CONTAINER` if the separately managed container has a different
-name. The script removes containers but does not delete named data volumes.
-
-### 4. Manual setup without Compose
-
-Use this alternative when you want to start each service separately. Start
-Docker Desktop first, then run these commands from the project directory:
-
-```bash
-docker run -d \
-	--name archive-qdrant \
-	-p 6333:6333 \
-	-v qdrant_data:/qdrant/storage \
-	qdrant/qdrant:latest
-
-docker run -d \
-	--name archive-ollama \
-	-p 11434:11434 \
-	-v ollama_data:/root/.ollama \
-	ollama/ollama:latest
-
-docker build -t archive-paddleocr:latest ./ocr
-ollama pull nomic-embed-text:latest
-ollama pull qwen2.5:14b
-ollama pull qwen2.5-coder:7b
-```
-
-If the containers already exist, start them with `docker start archive-qdrant
-archive-ollama` instead of creating them again.
-
-### 5. Set local environment variables
+The local startup procedure is [Start Locally](#start-locally). The settings
+below are reference values for advanced configuration only.
 
 These values are optional if you are using the defaults, but they are the correct variables to set when overriding the local configuration:
 
@@ -217,7 +154,7 @@ export QDRANT_HNSW_EF=64
 export QDRANT_API_KEY=replace-with-a-local-secret
 export OLLAMA_BASE=http://localhost:11434
 export EMBED_MODEL=nomic-embed-text:latest
-export ANSWER_MODEL=qwen2.5:14b
+export ANSWER_MODEL=gemma3:4b
 export OLLAMA_TEMPERATURE=0
 export OLLAMA_SEED=42
 export OLLAMA_TOP_P=0.2
@@ -268,10 +205,10 @@ metadata unrecoverable.
 
 The environment variables are optional because these are the project defaults. Set them in the terminal where you run the Python scripts if you need to override those defaults.
 
-The same non-secret defaults are stored in `settings.env` and are loaded
-automatically when `query.py` or `ingest.py` starts. Existing shell exports take
-precedence. Use `ARCHIVE_SETTINGS_FILE=/path/to/settings.env` to load a different
-settings file. Do not put API keys or encryption keys in this file.
+Local defaults and secrets are stored in the untracked `settings.env` file.
+Load it before starting the API as shown in [Start Locally](#start-locally).
+Existing shell exports take precedence. Use
+`ARCHIVE_SETTINGS_FILE=/path/to/settings.env` to load a different settings file.
 
 Ollama model settings are:
 
@@ -296,11 +233,7 @@ PaddlePaddle packages, includes the system libraries required for document and
 image processing, and copies in the project OCR runner.
 
 Docker Compose builds this Dockerfile automatically through the `paddleocr`
-service when you run:
-
-```bash
-docker compose up -d --build
-```
+service in step 1 of [Start Locally](#start-locally).
 
 To build the image without starting the Compose services, run:
 
@@ -355,64 +288,34 @@ has a 15-minute timeout, configurable with `OCR_TIMEOUT_SECONDS`. PDF pages are
 rendered with a 3,000-pixel maximum side by default to prevent the OCR
 container from exhausting memory; override this with `OCR_RENDER_MAX_SIDE`.
 
-## Quick start
+## CLI Watcher Workflow
 
-Once the setup is complete, use two terminal windows:
+Use this workflow to ingest files through the filesystem watcher.
 
-- Terminal 1: keep the watcher running.
-- Terminal 2: use for one-off ingestion, query, and reset commands.
-
-### Terminal 1: start the file watcher
-
-Open a terminal and run:
+1. Start the watcher in a terminal after completing
+   [Start Locally](#start-locally):
 
 ```bash
 cd /Users/cliftonhudson/archive_manager
+source .venv/bin/activate
+set -a
+source settings.env
+set +a
 archive-watch
 ```
 
-Leave this terminal open while the watcher is active.
-
-### Terminal 2: run archive commands
-
-Open a second terminal and run:
+2. Copy finished files into `ARCHIVE/` from another terminal:
 
 ```bash
-cd /Users/cliftonhudson/archive_manager
+cp /path/to/document.pdf /Users/cliftonhudson/archive_manager/ARCHIVE/
 ```
 
-#### Ingest a single file
+   Supported extensions are `.pdf`, `.png`, `.jpg`, and `.jpeg`.
 
-```bash
-archive-ingest --input /path/to/document.pdf
-```
+3. Leave each file in `ARCHIVE/`. The watcher waits for it to stop changing,
+   then ingests it. Monitor the watcher terminal for progress or errors.
 
-The positional form remains supported: `archive-ingest /path/to/document.pdf`.
-
-There are two ways to physically provide the file:
-
-**Option A: Use the watcher**
-
-1. Start the watcher in Terminal 1:
-
-	```bash
-	archive-watch
-	```
-
-2. Copy or move one supported file into the project's `ARCHIVE` directory:
-
-	```bash
-	cp /path/to/document.pdf /Users/cliftonhudson/archive_manager/ARCHIVE/
-	```
-
-	Supported extensions are `.pdf`, `.png`, `.jpg`, and `.jpeg`.
-
-3. Leave the file in `ARCHIVE`. The watcher waits until the file stops changing,
-	then ingests it automatically. Do not copy a file while it is still being
-	written if the application that creates it can instead export it to a
-	temporary location first.
-
-**Option B: Ingest directly**
+<!-- Superseded CLI alternatives retained temporarily for historical reference.
 
 Run the command against an existing file path, without copying it into
 `ARCHIVE`:
@@ -687,6 +590,8 @@ From the project directory, run:
 ```bash
 docker compose down
 ```
+
+-->
 
 ## Script invocation reference
 
